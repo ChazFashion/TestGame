@@ -731,7 +731,7 @@ PrefabInstance:
       objectReference: {fileID: 822921416}
     - target: {fileID: 616563430240045427, guid: 7b6d50e0b35589543aacf007351ac483, type: 3}
       propertyPath: useSounds
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 616563430240045427, guid: 7b6d50e0b35589543aacf007351ac483, type: 3}
       propertyPath: engineAudio
