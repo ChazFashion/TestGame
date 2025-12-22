@@ -333,67 +333,6 @@ namespace Ezereal
         {
             targetSteerAngle = turnValue.Get<float>() * maxSteerAngle;
         }
-        
-        // Публичные методы для мобильного управления
-        public void SetAcceleration(float value)
-        {
-            currentAccelerationValue = Mathf.Clamp01(value);
-        }
-        
-        public void SetBrake(float value)
-        {
-            currentBrakeValue = Mathf.Clamp01(value);
-            
-            if (isStarted && ezerealLightController != null)
-            {
-                if (currentBrakeValue > 0)
-                {
-                    ezerealLightController.BrakeLightsOn();
-                }
-                else
-                {
-                    ezerealLightController.BrakeLightsOff();
-                }
-            }
-        }
-        
-        public void SetSteering(float value)
-        {
-            targetSteerAngle = Mathf.Clamp(value, -1f, 1f) * maxSteerAngle;
-        }
-        
-        public void SetHandbrake(float value)
-        {
-            currentHandbrakeValue = Mathf.Clamp01(value);
-            
-            if (isStarted)
-            {
-                if (currentHandbrakeValue > 0)
-                {
-                    if (ezerealWheelFrictionController != null)
-                    {
-                        ezerealWheelFrictionController.StartDrifting(currentHandbrakeValue);
-                    }
-
-                    if (ezerealLightController != null)
-                    {
-                        ezerealLightController.HandbrakeLightOn();
-                    }
-                }
-                else
-                {
-                    if (ezerealWheelFrictionController != null)
-                    {
-                        ezerealWheelFrictionController.StopDrifting();
-                    }
-
-                    if (ezerealLightController != null)
-                    {
-                        ezerealLightController.HandbrakeLightOff();
-                    }
-                }
-            }
-        }
 
         void Steering()
         {
