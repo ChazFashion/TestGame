@@ -1,5 +1,5 @@
 using UnityEngine;
-using Ezereal;   // чтобы видеть EzerealCarController
+using Ezereal;   // EzerealCarController
 
 [RequireComponent(typeof(EzerealCarController))]
 public class AICarDriver : MonoBehaviour
