@@ -1,0 +1,66 @@
+{
+    "version": 1,
+    "name": "GameUIControls",
+    "maps": [
+        {
+            "name": "UI",
+            "id": "a9d02721-be41-49ff-bd1d-a90f3b9f62e9",
+            "actions": [
+                {
+                    "name": "TabNavigation",
+                    "type": "Value",
+                    "id": "89372df8-5770-47ec-a6fd-cd293e64f25c",
+                    "expectedControlType": "Axis",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": true
+                },
+                {
+                    "name": "Submit",
+                    "type": "Button",
+                    "id": "9d180681-7383-4a81-8f56-29baaca07f68",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "ab6ca2d4-3e2c-4a0a-9fc6-b8a19c6f3639",
+                    "path": "<Gamepad>/leftShoulder",
+                    "interactions": "",
+                    "processors": "Scale(factor=-1)",
+                    "groups": "",
+                    "action": "TabNavigation",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "f243fc21-b7c4-44c0-8a39-8a6a69a8f2fe",
+                    "path": "<Gamepad>/rightShoulder",
+                    "interactions": "",
+                    "processors": "Scale",
+                    "groups": "",
+                    "action": "TabNavigation",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "dfa53b59-3107-47f9-9c36-766dfc16a855",
+                    "path": "<Gamepad>/buttonSouth",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Submit",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        }
+    ],
+    "controlSchemes": []
+}
