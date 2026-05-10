@@ -20,35 +20,50 @@ namespace RacingUI
 
         [Header("UI Fields")]
         public StatField hpStat;
-        public StatField weightStat;
         public StatField speedStat;
+        public StatField weightStat;
+
+        [Header("Settings")]
+        public float animationSpeed = 5f;
+
+        private void OnEnable()
+        {
+            // Обнуляем полоски при каждом открытии гаража для эффекта анимации
+            if (hpStat.barSlider != null) hpStat.barSlider.value = 0;
+            if (speedStat.barSlider != null) speedStat.barSlider.value = 0;
+            if (weightStat.barSlider != null) weightStat.barSlider.value = 0;
+        }
 
         private void Update()
         {
             if (currentCar == null) return;
 
-            // Sync stats from the EzerealCarController
-            UpdateStat(hpStat, currentCar.horsePower);
-            UpdateStat(speedStat, currentCar.maxForwardSpeed);
+            // Плавно подтягиваем значения из скрипта машины к слайдерам
+            AnimateStat(hpStat, currentCar.horsePower);
+            AnimateStat(speedStat, currentCar.maxForwardSpeed);
             
-            // Weight isn't directly in the script but in the Rigidbody
+            // Вес берем из Rigidbody машины
             if (currentCar.vehicleRB != null)
             {
-                UpdateStat(weightStat, currentCar.vehicleRB.mass);
+                AnimateStat(weightStat, currentCar.vehicleRB.mass);
             }
         }
 
-        private void UpdateStat(StatField field, float currentValue)
+        private void AnimateStat(StatField field, float targetValue)
         {
-            if (field.valueText != null)
-            {
-                field.valueText.text = currentValue.ToString("F0");
-            }
-
             if (field.barSlider != null)
             {
-                // Smoothly lerp the slider value for that "premium" feel
-                field.barSlider.value = Mathf.Lerp(field.barSlider.value, currentValue / field.maxValue, Time.deltaTime * 5f);
+                // Защита от нулевого MaxValue
+                if (field.maxValue <= 0) field.maxValue = 100f; 
+                
+                field.barSlider.maxValue = field.maxValue;
+                field.barSlider.value = Mathf.Lerp(field.barSlider.value, targetValue, Time.deltaTime * animationSpeed);
+            }
+
+            if (field.valueText != null)
+            {
+                // Показываем целое число
+                field.valueText.text = Mathf.RoundToInt(targetValue).ToString();
             }
         }
     }

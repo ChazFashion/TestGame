@@ -500,27 +500,36 @@ namespace Ezereal
 
         void UpdateGearText(string gear)
         {
-            currentGearTMP_UI.text = gear;
-            currentGearTMP_Dashboard.text = gear;
+            if (currentGearTMP_UI != null) currentGearTMP_UI.text = gear;
+            if (currentGearTMP_Dashboard != null) currentGearTMP_Dashboard.text = gear;
+        }
+
+        void UpdateGearText(AutomaticGears gear)
+        {
+            string gearText = gear == AutomaticGears.Reverse ? "R" : (gear == AutomaticGears.Neutral ? "N" : "D");
+            if (currentGearTMP_UI != null) currentGearTMP_UI.text = gearText;
+            if (currentGearTMP_Dashboard != null) currentGearTMP_Dashboard.text = gearText;
         }
 
         void UpdateSpeedText(float speed)
         {
-            speed = Mathf.Abs(speed);
-
-            currentSpeedTMP_UI.text = speed.ToString("F0");
-            currentSpeedTMP_Dashboard.text = speed.ToString("F0");
+            string speedText = Mathf.RoundToInt(Mathf.Abs(speed)).ToString();
+            if (currentSpeedTMP_UI != null) currentSpeedTMP_UI.text = speedText;
+            if (currentSpeedTMP_Dashboard != null) currentSpeedTMP_Dashboard.text = speedText;
         }
 
         void UpdateAccelerationSlider()
         {
-            if (currentGear == AutomaticGears.Drive || currentGear == AutomaticGears.Reverse)
+            if (accelerationSlider != null)
             {
-                accelerationSlider.value = Mathf.Lerp(accelerationSlider.value, currentAccelerationValue, Time.deltaTime * 15f);
-            }
-            else
-            {
-                accelerationSlider.value = 0;
+                if (currentGear == AutomaticGears.Drive || currentGear == AutomaticGears.Reverse)
+                {
+                    accelerationSlider.value = Mathf.Lerp(accelerationSlider.value, currentAccelerationValue, Time.deltaTime * 15f);
+                }
+                else
+                {
+                    accelerationSlider.value = 0;
+                }
             }
         }
 
