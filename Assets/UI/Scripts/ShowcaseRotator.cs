@@ -1,16 +1,17 @@
 using UnityEngine;
+using UnityEngine.InputSystem; // Добавляем новую систему ввода
 
 namespace RacingUI
 {
     public class ShowcaseRotator : MonoBehaviour
     {
         [Header("Rotation Settings")]
-        public float rotationSpeed = 20f; // Скорость автоматического вращения
-        public bool autoRotate = true;   // Включить/выключить авто-вращение
+        public float rotationSpeed = 20f;
+        public bool autoRotate = true;
 
         [Header("Optional: Mouse Control")]
-        public bool allowMouseDrag = true; // Разрешить вращение мышкой
-        public float dragSpeed = 10f;      // Скорость вращения при перетаскивании
+        public bool allowMouseDrag = true;
+        public float dragSpeed = 0.5f; // Немного уменьшим для новой системы
 
         void Update()
         {
@@ -20,22 +21,26 @@ namespace RacingUI
                 transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime);
             }
 
-            // 2. Вращение мышкой (ЛКМ)
-            if (allowMouseDrag && Input.GetMouseButton(0))
+            // 2. Вращение мышкой (используем новую систему ввода)
+            if (allowMouseDrag && Mouse.current != null)
             {
-                float mouseX = Input.GetAxis("Mouse X");
+                if (Mouse.current.leftButton.isPressed)
+                {
+                    // Получаем движение мыши из новой системы
+                    float mouseX = Mouse.current.delta.x.ReadValue();
+                    
+                    if (Mathf.Abs(mouseX) > 0.01f)
+                    {
+                        transform.Rotate(Vector3.up, -mouseX * dragSpeed);
+                        autoRotate = false; 
+                    }
+                }
                 
-                // Вращаем объект в зависимости от движения мыши
-                transform.Rotate(Vector3.up, -mouseX * dragSpeed);
-                
-                // Временно отключаем авто-вращение, чтобы оно не мешало ручному
-                autoRotate = false; 
-            }
-            
-            // Если отпустили кнопку мыши — возвращаем авто-вращение через мгновение
-            if (allowMouseDrag && Input.GetMouseButtonUp(0))
-            {
-                autoRotate = true;
+                // Если кнопку отпустили (была нажата в прошлом кадре, а теперь нет)
+                if (Mouse.current.leftButton.wasReleasedThisFrame)
+                {
+                    autoRotate = true;
+                }
             }
         }
     }
