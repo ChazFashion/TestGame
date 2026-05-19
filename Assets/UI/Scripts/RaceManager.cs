@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using System.Collections;
+using System.Collections.Generic;
 using Ezereal;
 
 namespace RacingUI
@@ -9,19 +10,45 @@ namespace RacingUI
     {
         public static RaceManager Instance;
 
+        [System.Serializable]
+        public class ParticipantState
+        {
+            public EzerealCarController car;
+            public string name;
+            public bool isPlayer;
+            public int currentLap = 1;
+            public int nextCheckpointIndex = 0;
+            public float currentLapTime = 0f;
+            public float bestLapTime = float.MaxValue;
+            public float totalTime = 0f;
+            public bool hasFinished = false;
+        }
+
         [Header("UI References")]
         public TMP_Text countdownText;
         public GameObject countdownPanel;
         public GameObject finishPanel; 
         public TMP_Text resultText;
+        
+        [Header("Race Gameplay UI")]
+        public TMP_Text timerText;       // Текст текущего времени круга/гонки
+        public TMP_Text lapText;         // Текст номера круга (например, "LAP 1/3")
+        public TMP_Text bestLapText;     // Текст лучшего времени круга
 
         [Header("Participants")]
         public EzerealCarController playerCar;
-        public EzerealCarController aiCar;
+        public EzerealCarController aiCar; // Может быть пустым, если гонка одиночная
+
+        [Header("Track Data Settings")]
+        public string trackId = "Track_Forest";
+        public int totalLaps = 3;
 
         [Header("Race State")]
         public bool isRaceStarted = false;
         public bool isRaceFinished = false;
+
+        private List<ParticipantState> participants = new List<ParticipantState>();
+        private int totalCheckpoints = 0;
 
         private void Awake()
         {
@@ -32,8 +59,130 @@ namespace RacingUI
         {
             if (countdownPanel != null) countdownPanel.SetActive(false);
             if (finishPanel != null) finishPanel.SetActive(false);
-            
+
+            // 1. Загружаем параметры трассы из базы данных
+            LoadTrackDataFromDatabase();
+
+            // 2. Автоматически находим и настраиваем вейпоинты
+            AutoSetupWaypoints();
+
+            // 3. Инициализируем список участников гонки
+            InitializeParticipants();
+
+            // 4. Обновляем стартовый интерфейс кругов
+            UpdateLapUI();
+
+            // 5. Запускаем стартовый отсчет
             StartRaceSequence();
+        }
+
+        private void LoadTrackDataFromDatabase()
+        {
+            DataManager dm = FindObjectOfType<DataManager>();
+            if (dm != null)
+            {
+                var trackInfo = dm.GetTrackInfo(trackId);
+                if (trackInfo != null)
+                {
+                    if (trackInfo.ContainsKey("laps_count"))
+                    {
+                        totalLaps = System.Convert.ToInt32(trackInfo["laps_count"]);
+                    }
+                    Debug.Log($"[RaceManager] Данные трассы '{trackId}' загружены из БД: Кругов={totalLaps}");
+                }
+            }
+        }
+
+        private void AutoSetupWaypoints()
+        {
+            // Ищем контейнер с именем "waypoints" или содержащим "waypoint"
+            GameObject container = null;
+            foreach (var go in FindObjectsOfType<GameObject>(true))
+            {
+                if ((go.name.ToLower() == "waypoints" || go.name.ToLower().Contains("waypoint")) && go.transform.parent == null)
+                {
+                    container = go;
+                    break;
+                }
+            }
+
+            if (container != null)
+            {
+                int index = 0;
+                foreach (Transform child in container.transform)
+                {
+                    RaceWaypoint wp = child.GetComponent<RaceWaypoint>();
+                    if (wp == null)
+                    {
+                        wp = child.gameObject.AddComponent<RaceWaypoint>();
+                    }
+                    wp.waypointIndex = index;
+
+                    // Настраиваем коллайдер как триггер
+                    Collider col = child.GetComponent<Collider>();
+                    if (col != null)
+                    {
+                        col.isTrigger = true;
+                    }
+                    else
+                    {
+                        BoxCollider box = child.gameObject.AddComponent<BoxCollider>();
+                        box.isTrigger = true;
+                    }
+
+                    // Скрываем видимость кубика в игре (чтобы они были невидимыми триггерами)
+                    MeshRenderer renderer = child.GetComponent<MeshRenderer>();
+                    if (renderer != null)
+                    {
+                        renderer.enabled = false;
+                    }
+
+                    index++;
+                }
+                totalCheckpoints = index;
+                Debug.Log($"[RaceManager] Автоматически настроено {totalCheckpoints} вейпоинтов из контейнера '{container.name}'");
+            }
+            else
+            {
+                // Поиск по сцене, если нет общего родителя
+                RaceWaypoint[] wps = FindObjectsOfType<RaceWaypoint>();
+                System.Array.Sort(wps, (a, b) => a.waypointIndex.CompareTo(b.waypointIndex));
+                totalCheckpoints = wps.Length;
+                Debug.LogWarning($"[RaceManager] Контейнер 'waypoints' не найден в корне. Найдено {totalCheckpoints} компонентов RaceWaypoint на сцене.");
+            }
+        }
+
+        private void InitializeParticipants()
+        {
+            participants.Clear();
+
+            if (playerCar != null)
+            {
+                participants.Add(new ParticipantState()
+                {
+                    car = playerCar,
+                    name = "Игрок",
+                    isPlayer = true
+                });
+            }
+
+            if (aiCar != null)
+            {
+                // Ищем имя бота у AICarDriver
+                string botName = "Бот-Соперник";
+                var aiDriver = aiCar.GetComponentInChildren<AICarDriver>();
+                if (aiDriver != null)
+                {
+                    botName = aiDriver.botName;
+                }
+
+                participants.Add(new ParticipantState()
+                {
+                    car = aiCar,
+                    name = botName,
+                    isPlayer = false
+                });
+            }
         }
 
         public void StartRaceSequence()
@@ -66,7 +215,28 @@ namespace RacingUI
 
         private void Update()
         {
-            // Навигация геймпадом на экране финиша
+            // 1. Логика таймера гонки
+            if (isRaceStarted && !isRaceFinished)
+            {
+                float dt = Time.deltaTime;
+                foreach (var p in participants)
+                {
+                    if (!p.hasFinished)
+                    {
+                        p.currentLapTime += dt;
+                        p.totalTime += dt;
+                    }
+                }
+
+                // Обновляем таймер игрока на экране
+                ParticipantState playerState = GetPlayerState();
+                if (playerState != null && timerText != null)
+                {
+                    timerText.text = "ВРЕМЯ: " + FormatTime(playerState.currentLapTime);
+                }
+            }
+
+            // 2. Навигация геймпадом на экране финиша
             if (isRaceFinished && finishPanel != null && finishPanel.activeSelf)
             {
                 var gamepad = UnityEngine.InputSystem.Gamepad.current;
@@ -76,7 +246,6 @@ namespace RacingUI
                     {
                         GameObject current = UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject;
                         
-                        // Ищем кнопки более надежным способом (даже если они внутри доп. объектов)
                         UnityEngine.UI.Button[] buttons = finishPanel.GetComponentsInChildren<UnityEngine.UI.Button>();
                         if (buttons.Length >= 2)
                         {
@@ -93,35 +262,161 @@ namespace RacingUI
             }
         }
 
+        // Вызывается из триггера вейпоинта
+        public void OnCarPassedWaypoint(EzerealCarController car, int waypointIndex)
+        {
+            ParticipantState state = GetParticipantState(car);
+            if (state == null || state.hasFinished) return;
+
+            // Если машина пересекает следующий по порядку вейпоинт
+            if (waypointIndex == state.nextCheckpointIndex)
+            {
+                state.nextCheckpointIndex++;
+                Debug.Log($"[RaceManager] {state.name} прошел чекпоинт {waypointIndex + 1}/{totalCheckpoints}");
+            }
+        }
+
+        // Вызывается из финишного триггера
+        public void OnCarCrossedFinish(EzerealCarController car)
+        {
+            if (!isRaceStarted || isRaceFinished) return;
+
+            ParticipantState state = GetParticipantState(car);
+            if (state == null || state.hasFinished) return;
+
+            // Проверяем, прошел ли участник все чекпоинты (или если чекпоинтов на сцене нет вообще)
+            if (totalCheckpoints == 0 || state.nextCheckpointIndex >= totalCheckpoints)
+            {
+                float completedLapTime = state.currentLapTime;
+
+                // Защита от спама триггера на старте (игнорируем первые 5 секунд)
+                if (state.totalTime < 5f && state.currentLap == 1) return;
+
+                // Записываем лучший круг
+                if (completedLapTime < state.bestLapTime)
+                {
+                    state.bestLapTime = completedLapTime;
+                    if (state.isPlayer && bestLapText != null)
+                    {
+                        bestLapText.text = "ЛУЧШИЙ КРУГ: " + FormatTime(state.bestLapTime);
+                    }
+                }
+
+                Debug.Log($"[RaceManager] {state.name} завершил круг {state.currentLap}! Время круга: {FormatTime(completedLapTime)}");
+
+                state.currentLap++;
+                state.currentLapTime = 0f;
+                state.nextCheckpointIndex = 0;
+
+                if (state.isPlayer)
+                {
+                    UpdateLapUI();
+                }
+
+                // Проверка завершения гонки (все круги пройдены)
+                if (state.currentLap > totalLaps)
+                {
+                    state.hasFinished = true;
+
+                    // Вычисляем место
+                    int rank = 1;
+                    foreach (var p in participants)
+                    {
+                        if (p != state && p.hasFinished) rank++;
+                    }
+
+                    Debug.Log($"[RaceManager] {state.name} ФИНИШИРОВАЛ! Место: {rank}");
+
+                    if (state.isPlayer)
+                    {
+                        FinishRace(rank);
+
+                        // Сохраняем лучший круг в БД
+                        DataManager dm = FindObjectOfType<DataManager>();
+                        if (dm != null && state.bestLapTime != float.MaxValue)
+                        {
+                            dm.SaveRaceRecord(trackId, state.bestLapTime);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"[RaceManager] {state.name} пересек линию финиша, но не прошел все чекпоинты! Пройдено: {state.nextCheckpointIndex}/{totalCheckpoints}");
+            }
+        }
+
+        private void UpdateLapUI()
+        {
+            ParticipantState playerState = GetPlayerState();
+            if (playerState != null)
+            {
+                if (lapText != null)
+                {
+                    int displayLap = Mathf.Min(playerState.currentLap, totalLaps);
+                    lapText.text = $"КРУГ: {displayLap} / {totalLaps}";
+                }
+                
+                if (bestLapText != null)
+                {
+                    bestLapText.text = playerState.bestLapTime == float.MaxValue 
+                        ? "ЛУЧШИЙ КРУГ: --:--.--" 
+                        : "ЛУЧШИЙ КРУГ: " + FormatTime(playerState.bestLapTime);
+                }
+            }
+        }
+
+        private ParticipantState GetPlayerState()
+        {
+            foreach (var p in participants)
+            {
+                if (p.isPlayer) return p;
+            }
+            return null;
+        }
+
+        private ParticipantState GetParticipantState(EzerealCarController car)
+        {
+            foreach (var p in participants)
+            {
+                if (p.car == car) return p;
+            }
+            return null;
+        }
+
+        public int GetPlayerCheckpointIndex()
+        {
+            ParticipantState playerState = GetPlayerState();
+            return playerState != null ? playerState.nextCheckpointIndex : 0;
+        }
+
+        private string FormatTime(float timeInSeconds)
+        {
+            if (timeInSeconds == float.MaxValue) return "--:--.--";
+            int minutes = Mathf.FloorToInt(timeInSeconds / 60F);
+            int seconds = Mathf.FloorToInt(timeInSeconds - minutes * 60);
+            float fraction = (timeInSeconds * 100) % 100;
+            return string.Format("{0:00}:{1:00}.{2:00}", minutes, seconds, fraction);
+        }
+
         public void FinishRace(int rank)
         {
-            Debug.Log("RaceManager: Функция FinishRace вызвана! Текущий статус isRaceFinished: " + isRaceFinished);
-
-            if (isRaceFinished) 
-            {
-                Debug.Log("RaceManager: Гонка уже была завершена ранее. Выхожу.");
-                return;
-            }
+            if (isRaceFinished) return;
             
             isRaceFinished = true;
             isRaceStarted = false;
 
-            Debug.Log("RaceManager: Пытаюсь остановить машины...");
             FreezeCars(true);
 
-            // ВЫКЛЮЧАЕМ HUD игрока
+            // Выключаем стандартный HUD игрока
             if (playerCar != null)
             {
-                // Ищем Канвас именно у объекта Игрока
                 Transform playerRoot = playerCar.transform.root;
                 Canvas[] allCanvases = playerRoot.GetComponentsInChildren<Canvas>(true);
-                
                 foreach (Canvas c in allCanvases)
                 {
-                    // Выключаем все Канвасы, которые принадлежат игроку (но не тот, где скрипт RaceManager)
                     if (c.gameObject != this.gameObject)
                     {
-                        Debug.Log("RaceManager: Выключаю найденный Канвас игрока: " + c.name);
                         c.gameObject.SetActive(false);
                     }
                 }
@@ -130,30 +425,18 @@ namespace RacingUI
             // Показываем экран результатов
             if (finishPanel != null) 
             {
-                Debug.Log("RaceManager: Включаю объект: " + finishPanel.name);
                 finishPanel.SetActive(true);
                 
-                // Автоматически выделяем кнопку Restart, чтобы можно было сразу нажать A/Enter
                 UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
-                // Ищем кнопку Restart внутри панели и выделяем её
                 GameObject restartBtn = finishPanel.GetComponentInChildren<UnityEngine.UI.Button>()?.gameObject;
                 if (restartBtn != null) UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(restartBtn);
-            }
-            else 
-            {
-                Debug.LogError("RaceManager ОШИБКА: Объект finishPanel НЕ ПРИВЯЗАН в инспекторе!");
             }
 
             if (resultText != null)
             {
                 resultText.text = "ВАШЕ МЕСТО: " + rank;
             }
-            else
-            {
-                Debug.LogWarning("RaceManager: Текст результата не привязан.");
-            }
 
-            // Показываем курсор
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
         }
@@ -170,7 +453,7 @@ namespace RacingUI
 
         public void FreezeCars(bool freeze)
         {
-            // ЗАМОРОЗКА ИГРОКА
+            // ИГРОК
             if (playerCar != null) 
             {
                 playerCar.enabled = !freeze;
@@ -178,10 +461,7 @@ namespace RacingUI
                 
                 if (playerCar.vehicleRB != null)
                 {
-                    // Жесткая заморозка физики только если гонка ОКОНЧЕНА
-                    // На старте (freeze=true, но finish=false) просто обнуляем скорость
                     playerCar.vehicleRB.isKinematic = (freeze && isRaceFinished); 
-                    
                     if (freeze)
                     {
                         playerCar.vehicleRB.velocity = Vector3.zero;
@@ -190,7 +470,7 @@ namespace RacingUI
                 }
             }
 
-            // ЗАМОРОЗКА БОТА
+            // БОТ
             if (aiCar != null) 
             {
                 aiCar.enabled = !freeze;
@@ -206,7 +486,6 @@ namespace RacingUI
                     }
                 }
 
-                // AI скрипты выключаем всегда при заморозке
                 MonoBehaviour[] allScripts = aiCar.GetComponentsInChildren<MonoBehaviour>();
                 foreach (var script in allScripts)
                 {
