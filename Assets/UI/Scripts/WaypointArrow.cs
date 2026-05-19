@@ -31,6 +31,16 @@ namespace RacingUI
         {
             if (nodes.Count == 0) return;
 
+            // Синхронизируем цель стрелки с текущим чекпоинтом игрока из RaceManager
+            if (RaceManager.Instance != null)
+            {
+                int nextIndex = RaceManager.Instance.GetPlayerCheckpointIndex();
+                if (nextIndex < nodes.Count)
+                {
+                    currentNodeIndex = nextIndex;
+                }
+            }
+
             Transform targetNode = nodes[currentNodeIndex];
             Vector3 direction = targetNode.position - transform.position;
 
@@ -42,7 +52,7 @@ namespace RacingUI
                 arrowModel.rotation = Quaternion.Slerp(arrowModel.rotation, targetRot, Time.deltaTime * rotationSpeed);
             }
 
-            // --- ЛОГИКА ДЛЯ UI СТРЕЛКИ (можно отключить, если используем 3D) ---
+            // --- ЛОГИКА ДЛЯ UI СТРЕЛКИ (Канвас) ---
             if (uiArrow != null)
             {
                 Vector3 localDir = transform.InverseTransformDirection(direction);
@@ -50,14 +60,17 @@ namespace RacingUI
                 uiArrow.localRotation = Quaternion.Slerp(uiArrow.localRotation, Quaternion.Euler(0, 0, -angle), Time.deltaTime * rotationSpeed);
             }
 
-            // Проверка дистанции (используем 2D расстояние для точности)
-            Vector3 flatPos = new Vector3(transform.position.x, 0, transform.position.z);
-            Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
-
-            if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
+            // Если гонка не запущена, переключаем чекпоинты просто по дистанции (для свободной езды)
+            if (RaceManager.Instance == null)
             {
-                Debug.Log("--- ПРОЙДЕНО: " + nodes[currentNodeIndex].name + " ---");
-                currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
+                Vector3 flatPos = new Vector3(transform.position.x, 0, transform.position.z);
+                Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
+
+                if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
+                {
+                    Debug.Log("--- ПРОЙДЕНО (Свободная езда): " + nodes[currentNodeIndex].name + " ---");
+                    currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
+                }
             }
         }
 

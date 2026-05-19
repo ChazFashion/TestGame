@@ -54,6 +54,20 @@ namespace Ezereal
         [Header("Gearbox")]
         public AutomaticGears currentGear = AutomaticGears.Drive;
 
+        public enum TransmissionModes { Automatic, Manual }
+        [Header("Transmission Settings")]
+        public TransmissionModes transmissionMode = TransmissionModes.Manual;
+        public int currentManualGear = 0; // -1 = R, 0 = N, 1..5 = Forward gears
+
+        [Header("Engine RPM Settings")]
+        public float engineRPM = 1000f;
+        public float maxRPM = 7000f;
+        public float idleRPM = 1000f;
+        public float redlineRPM = 6000f;
+        public bool isLimiterActive = false;
+        private float limiterTime = 0f;
+        private bool isLimitingState = false;
+
         [Header("Debug Info")]
         public bool stationary = true;
         [SerializeField] float currentSpeed = 0f;
@@ -141,6 +155,16 @@ namespace Ezereal
                 {
                     ezerealSoundController.TurnOnEngineSound();
                 }
+            }
+
+            // Инициализация отображения коробки передач при старте
+            if (transmissionMode == TransmissionModes.Manual)
+            {
+                UpdateManualGearText();
+            }
+            else
+            {
+                UpdateGearText(currentGear);
             }
         }
 
@@ -255,77 +279,145 @@ namespace Ezereal
         {
             if (!isStarted) return;
 
-            if (currentGear == AutomaticGears.Drive)
+            if (transmissionMode == TransmissionModes.Automatic)
             {
-                // Calculate how close the car is to top speed
-                speedFactor = Mathf.InverseLerp(0, maxForwardSpeed, currentSpeed);
-
-                // Use that to calculate how much torque is available (zero torque at top speed)
-                float currentMotorTorque = Mathf.Lerp(horsePower, 0, speedFactor);
-
-                if (currentAccelerationValue > 0f && currentSpeed < maxForwardSpeed)
+                if (currentGear == AutomaticGears.Drive)
                 {
-                    if (driveType == DriveTypes.RWD)
+                    speedFactor = Mathf.InverseLerp(0, maxForwardSpeed, currentSpeed);
+                    float torqueMultiplier = Mathf.Lerp(12f, 3f, speedFactor);
+                    float currentMotorTorque = horsePower * torqueMultiplier * (1f - speedFactor);
+
+                    ApplyTorqueToDriveWheels(currentMotorTorque * currentAccelerationValue);
+                }
+                else if (currentGear == AutomaticGears.Reverse)
+                {
+                    if (currentAccelerationValue > 0f && currentSpeed > -maxReverseSpeed)
                     {
-                        rearLeftWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                        rearRightWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
+                        float accel = 1f;
+                        float reverseTorque = horsePower * 8f;
+                        ApplyTorqueToDriveWheels(-accel * reverseTorque);
                     }
-                    else if (driveType == DriveTypes.FWD)
+                    else
                     {
-                        frontLeftWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                        frontRightWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                    }
-                    else if (driveType == DriveTypes.AWD)
-                    {
-                        frontLeftWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                        frontRightWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                        rearLeftWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
-                        rearRightWheelCollider.motorTorque = currentMotorTorque * currentAccelerationValue;
+                        ClearWheelTorque();
                     }
                 }
                 else
                 {
-                    frontLeftWheelCollider.motorTorque = 0;
-                    frontRightWheelCollider.motorTorque = 0;
-                    rearLeftWheelCollider.motorTorque = 0;
-                    rearRightWheelCollider.motorTorque = 0;
+                    ClearWheelTorque();
                 }
             }
-
-            if (currentGear == AutomaticGears.Reverse)
+            else // MANUAL TRANSMISSION MODE
             {
-                if (currentAccelerationValue > 0f && currentSpeed > -maxReverseSpeed)
+                if (currentManualGear == 0) // Neutral
                 {
-                    float accel = 1f; // Invert Acceleration value
-
-                    if (driveType == DriveTypes.RWD)
+                    ClearWheelTorque();
+                }
+                else if (currentManualGear == -1) // Reverse
+                {
+                    if (currentAccelerationValue > 0f && currentSpeed > -maxReverseSpeed)
                     {
-                        rearLeftWheelCollider.motorTorque = -accel * horsePower;
-                        rearRightWheelCollider.motorTorque = -accel * horsePower;
+                        float accel = 1f;
+                        float reverseTorque = horsePower * 8f;
+                        ApplyTorqueToDriveWheels(-accel * reverseTorque);
                     }
-                    else if (driveType == DriveTypes.FWD)
+                    else
                     {
-                        frontLeftWheelCollider.motorTorque = -accel * horsePower;
-                        frontRightWheelCollider.motorTorque = -accel * horsePower;
-                    }
-                    else if (driveType == DriveTypes.AWD)
-                    {
-                        frontLeftWheelCollider.motorTorque = -accel * horsePower;
-                        frontRightWheelCollider.motorTorque = -accel * horsePower;
-                        rearLeftWheelCollider.motorTorque = -accel * horsePower;
-                        rearRightWheelCollider.motorTorque = -accel * horsePower;
+                        ClearWheelTorque();
                     }
                 }
-                else
+                else // Forward gears (1 to 5)
                 {
-                    frontLeftWheelCollider.motorTorque = 0;
-                    frontRightWheelCollider.motorTorque = 0;
-                    rearLeftWheelCollider.motorTorque = 0;
-                    rearRightWheelCollider.motorTorque = 0;
+                    float gearMaxSpeed = GetManualGearMaxSpeed(currentManualGear);
+                    float gearTorqueMultiplier = GetManualGearTorqueMultiplier(currentManualGear);
+
+                    // Рассчитываем обороты/скорость для текущей передачи
+                    float gearSpeedFactor = Mathf.InverseLerp(0, gearMaxSpeed, currentSpeed);
+
+                    float currentMotorTorque = 0f;
+                    // Если не превысили лимит оборотов передачи
+                    if (currentSpeed < gearMaxSpeed)
+                    {
+                        currentMotorTorque = horsePower * gearTorqueMultiplier * (1f - gearSpeedFactor);
+                    }
+
+                    if (currentAccelerationValue > 0f)
+                    {
+                        ApplyTorqueToDriveWheels(currentMotorTorque * currentAccelerationValue);
+                    }
+                    else
+                    {
+                        ClearWheelTorque();
+                    }
                 }
             }
 
             UpdateAccelerationSlider();
+        }
+
+        private void ApplyTorqueToDriveWheels(float torque)
+        {
+            if (driveType == DriveTypes.RWD)
+            {
+                rearLeftWheelCollider.motorTorque = torque;
+                rearRightWheelCollider.motorTorque = torque;
+            }
+            else if (driveType == DriveTypes.FWD)
+            {
+                frontLeftWheelCollider.motorTorque = torque;
+                frontRightWheelCollider.motorTorque = torque;
+            }
+            else if (driveType == DriveTypes.AWD)
+            {
+                frontLeftWheelCollider.motorTorque = torque;
+                frontRightWheelCollider.motorTorque = torque;
+                rearLeftWheelCollider.motorTorque = torque;
+                rearRightWheelCollider.motorTorque = torque;
+            }
+        }
+
+        private void ClearWheelTorque()
+        {
+            frontLeftWheelCollider.motorTorque = 0;
+            frontRightWheelCollider.motorTorque = 0;
+            rearLeftWheelCollider.motorTorque = 0;
+            rearRightWheelCollider.motorTorque = 0;
+        }
+
+        private float GetManualGearMaxSpeed(int gear)
+        {
+            switch (gear)
+            {
+                case 1: return maxForwardSpeed * 0.25f; // 25% от макс. скорости
+                case 2: return maxForwardSpeed * 0.45f; // 45%
+                case 3: return maxForwardSpeed * 0.68f; // 68%
+                case 4: return maxForwardSpeed * 0.88f; // 88%
+                case 5: return maxForwardSpeed;         // 100%
+                default: return maxForwardSpeed;
+            }
+        }
+
+        private float GetManualGearTorqueMultiplier(int gear)
+        {
+            switch (gear)
+            {
+                case 1: return 16f; // Пушечный разгон с места
+                case 2: return 9.5f;
+                case 3: return 6f;
+                case 4: return 4f;
+                case 5: return 2.5f; // Для поддержания максимальной скорости
+                default: return 1f;
+            }
+        }
+
+        void UpdateManualGearText()
+        {
+            string gearText = "N";
+            if (currentManualGear == -1) gearText = "R";
+            else if (currentManualGear == 0) gearText = "N";
+            else gearText = currentManualGear.ToString();
+
+            UpdateGearText(gearText);
         }
 
         void Braking()
@@ -393,50 +485,82 @@ namespace Ezereal
 
         void OnDownShift()
         {
-            switch (currentGear)
+            if (transmissionMode == TransmissionModes.Manual)
             {
-                case AutomaticGears.Reverse:
-                    // already at lowest
-                    break;
+                if (currentManualGear > -1)
+                {
+                    currentManualGear--;
+                    UpdateManualGearText();
 
-                case AutomaticGears.Neutral:
-                    currentGear--;
-                    UpdateGearText("R");
-                    if (isStarted && ezerealLightController != null)
+                    if (currentManualGear == -1 && isStarted && ezerealLightController != null)
                     {
                         ezerealLightController.ReverseLightsOn();
                     }
-                    break;
+                }
+            }
+            else // Automatic
+            {
+                switch (currentGear)
+                {
+                    case AutomaticGears.Reverse:
+                        // already at lowest
+                        break;
 
-                case AutomaticGears.Drive:
-                    currentGear--;
-                    UpdateGearText("N");
-                    break;
+                    case AutomaticGears.Neutral:
+                        currentGear--;
+                        UpdateGearText("R");
+                        if (isStarted && ezerealLightController != null)
+                        {
+                            ezerealLightController.ReverseLightsOn();
+                        }
+                        break;
+
+                    case AutomaticGears.Drive:
+                        currentGear--;
+                        UpdateGearText("N");
+                        break;
+                }
             }
         }
 
         void OnUpShift()
         {
-            switch (currentGear)
+            if (transmissionMode == TransmissionModes.Manual)
             {
-                case AutomaticGears.Reverse:
-                    currentGear++;
-                    UpdateGearText("N");
-
-                    if (isStarted && ezerealLightController != null)
+                if (currentManualGear < 5)
+                {
+                    if (currentManualGear == -1 && isStarted && ezerealLightController != null)
                     {
                         ezerealLightController.ReverseLightsOff();
                     }
-                    break;
 
-                case AutomaticGears.Neutral:
-                    currentGear++;
-                    UpdateGearText("D");
-                    break;
+                    currentManualGear++;
+                    UpdateManualGearText();
+                }
+            }
+            else // Automatic
+            {
+                switch (currentGear)
+                {
+                    case AutomaticGears.Reverse:
+                        currentGear++;
+                        UpdateGearText("N");
 
-                case AutomaticGears.Drive:
-                    // already at highest
-                    break;
+                        if (isStarted && ezerealLightController != null)
+                        {
+                            ezerealLightController.ReverseLightsOff();
+                        }
+                        break;
+
+                    case AutomaticGears.Neutral:
+                        currentGear++;
+                        UpdateGearText("D");
+                        break;
+
+                    case AutomaticGears.Drive:
+                        // already at highest
+                        break;
+                }
             }
         }
 
@@ -480,6 +604,141 @@ namespace Ezereal
             FrontRightWheelRPM = frontRightWheelCollider.rpm;
             RearLeftWheelRPM = rearLeftWheelCollider.rpm;
             RearRightWheelRPM = rearRightWheelCollider.rpm;
+
+            CalculateEngineRPM();
+        }
+
+        private float GetDriveWheelRPM()
+        {
+            float rpmSum = 0f;
+            int count = 0;
+
+            if (driveType == DriveTypes.RWD || driveType == DriveTypes.AWD)
+            {
+                if (rearLeftWheelCollider != null) { rpmSum += Mathf.Abs(rearLeftWheelCollider.rpm); count++; }
+                if (rearRightWheelCollider != null) { rpmSum += Mathf.Abs(rearRightWheelCollider.rpm); count++; }
+            }
+            
+            if (driveType == DriveTypes.FWD || driveType == DriveTypes.AWD)
+            {
+                if (frontLeftWheelCollider != null) { rpmSum += Mathf.Abs(frontLeftWheelCollider.rpm); count++; }
+                if (frontRightWheelCollider != null) { rpmSum += Mathf.Abs(frontRightWheelCollider.rpm); count++; }
+            }
+
+            return count > 0 ? (rpmSum / count) : 0f;
+        }
+
+        private float GetManualGearRatio(int gear)
+        {
+            switch (gear)
+            {
+                case 1: return 22f;
+                case 2: return 12f;
+                case 3: return 8f;
+                case 4: return 5.5f;
+                case 5: return 3.8f;
+                case -1: return 15f; // Задняя передача
+                default: return 0f;  // Нейтралка
+            }
+        }
+
+        void CalculateEngineRPM()
+        {
+            if (!isStarted)
+            {
+                engineRPM = Mathf.MoveTowards(engineRPM, 0f, Time.deltaTime * 3000f);
+                isLimiterActive = false;
+                return;
+            }
+
+            if (transmissionMode == TransmissionModes.Manual)
+            {
+                if (currentManualGear == 0) // Neutral
+                {
+                    if (currentAccelerationValue > 0)
+                    {
+                        engineRPM = Mathf.MoveTowards(engineRPM, maxRPM, Time.deltaTime * 9000f);
+                    }
+                    else
+                    {
+                        engineRPM = Mathf.MoveTowards(engineRPM, idleRPM, Time.deltaTime * 5000f);
+                    }
+                }
+                else // Gears 1..5 and R
+                {
+                    float wheelRPM = GetDriveWheelRPM();
+                    float ratio = GetManualGearRatio(currentManualGear);
+                    
+                    // Физический расчет оборотов двигателя на основе вращения колес!
+                    float targetRPM = idleRPM + (wheelRPM * ratio);
+                    
+                    // Сглаживаем, чтобы стрелка не дергалась слишком дико
+                    engineRPM = Mathf.Lerp(engineRPM, targetRPM, Time.deltaTime * 12f);
+                }
+            }
+            else // Automatic Mode
+            {
+                float wheelRPM = GetDriveWheelRPM();
+                float speedKmh = Mathf.Abs(currentSpeed);
+                float ratio = 6.0f; 
+                
+                if (currentGear == AutomaticGears.Drive)
+                {
+                    // Имитируем переключения автомата
+                    if (speedKmh < maxForwardSpeed * 0.25f) ratio = 22f;
+                    else if (speedKmh < maxForwardSpeed * 0.5f) ratio = 12f;
+                    else if (speedKmh < maxForwardSpeed * 0.75f) ratio = 8f;
+                    else ratio = 5.5f;
+                }
+                else if (currentGear == AutomaticGears.Reverse)
+                {
+                    ratio = 15f;
+                }
+                else
+                {
+                    ratio = 0f;
+                }
+
+                if (ratio == 0f)
+                {
+                    engineRPM = Mathf.MoveTowards(engineRPM, idleRPM, Time.deltaTime * 4000f);
+                }
+                else
+                {
+                    float targetRPM = idleRPM + (wheelRPM * ratio);
+                    engineRPM = Mathf.Lerp(engineRPM, targetRPM, Time.deltaTime * 8f);
+                }
+            }
+
+            // Ограничиваем обороты сверху
+            if (engineRPM > maxRPM) engineRPM = maxRPM;
+
+            // Обработка отсечки (Limiter)
+            if (engineRPM >= maxRPM - 50f && currentAccelerationValue > 0f)
+            {
+                limiterTime += Time.deltaTime;
+                if (limiterTime > 0.07f) // частота пульсации ~14 Гц
+                {
+                    isLimitingState = !isLimitingState;
+                    limiterTime = 0f;
+                }
+
+                if (isLimitingState)
+                {
+                    engineRPM = maxRPM - 700f; // обороты резко падают на отсечке
+                    isLimiterActive = true;
+                }
+                else
+                {
+                    isLimiterActive = false;
+                }
+            }
+            else
+            {
+                limiterTime = 0f;
+                isLimitingState = false;
+                isLimiterActive = false;
+            }
         }
 
         private void UpdateWheel(WheelCollider col, Transform mesh)
@@ -522,7 +781,17 @@ namespace Ezereal
         {
             if (accelerationSlider != null)
             {
-                if (currentGear == AutomaticGears.Drive || currentGear == AutomaticGears.Reverse)
+                bool isDriving = false;
+                if (transmissionMode == TransmissionModes.Automatic)
+                {
+                    isDriving = (currentGear == AutomaticGears.Drive || currentGear == AutomaticGears.Reverse);
+                }
+                else
+                {
+                    isDriving = (currentManualGear != 0); // Любая передача кроме нейтралки
+                }
+
+                if (isDriving)
                 {
                     accelerationSlider.value = Mathf.Lerp(accelerationSlider.value, currentAccelerationValue, Time.deltaTime * 15f);
                 }
