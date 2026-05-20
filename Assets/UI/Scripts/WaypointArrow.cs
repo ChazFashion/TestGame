@@ -29,19 +29,31 @@ namespace RacingUI
 
         void Update()
         {
-            if (nodes.Count == 0) return;
+            Transform targetNode = null;
 
-            // Синхронизируем цель стрелки с текущим чекпоинтом игрока из RaceManager
+            // Синхронизируем цель стрелки с текущим активным чекпоинтом из RaceManager
             if (RaceManager.Instance != null)
             {
-                int nextIndex = RaceManager.Instance.GetPlayerCheckpointIndex();
-                if (nextIndex < nodes.Count)
+                targetNode = RaceManager.Instance.GetPlayerTargetCheckpoint();
+            }
+
+            // Если гонка не активна или нет вейпоинта от менеджера, берем из локального списка (свободная езда)
+            if (targetNode == null)
+            {
+                if (nodes.Count == 0) return;
+                targetNode = nodes[currentNodeIndex];
+
+                // Переключение по дистанции в режиме свободной езды
+                Vector3 flatPos = new Vector3(transform.position.x, 0, transform.position.z);
+                Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
+
+                if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
                 {
-                    currentNodeIndex = nextIndex;
+                    Debug.Log("--- ПРОЙДЕНО (Свободная езда): " + nodes[currentNodeIndex].name + " ---");
+                    currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
                 }
             }
 
-            Transform targetNode = nodes[currentNodeIndex];
             Vector3 direction = targetNode.position - transform.position;
 
             // --- ЛОГИКА ДЛЯ 3D СТРЕЛКИ ---
@@ -58,19 +70,6 @@ namespace RacingUI
                 Vector3 localDir = transform.InverseTransformDirection(direction);
                 float angle = Mathf.Atan2(localDir.x, localDir.z) * Mathf.Rad2Deg;
                 uiArrow.localRotation = Quaternion.Slerp(uiArrow.localRotation, Quaternion.Euler(0, 0, -angle), Time.deltaTime * rotationSpeed);
-            }
-
-            // Если гонка не запущена, переключаем чекпоинты просто по дистанции (для свободной езды)
-            if (RaceManager.Instance == null)
-            {
-                Vector3 flatPos = new Vector3(transform.position.x, 0, transform.position.z);
-                Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
-
-                if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
-                {
-                    Debug.Log("--- ПРОЙДЕНО (Свободная езда): " + nodes[currentNodeIndex].name + " ---");
-                    currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
-                }
             }
         }
 

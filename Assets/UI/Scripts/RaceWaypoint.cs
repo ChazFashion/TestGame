@@ -15,7 +15,7 @@ namespace RacingUI
             {
                 if (RaceManager.Instance != null)
                 {
-                    RaceManager.Instance.OnCarPassedWaypoint(car, waypointIndex);
+                    RaceManager.Instance.OnCarPassedWaypoint(car, this.transform);
                 }
             }
         }
