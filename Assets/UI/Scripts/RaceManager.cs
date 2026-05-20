@@ -22,6 +22,10 @@ namespace RacingUI
             public float bestLapTime = float.MaxValue;
             public float totalTime = 0f;
             public bool hasFinished = false;
+
+            // Список чекпоинтов конкретно для этого участника в нужном порядке прохождения
+            [System.NonSerialized]
+            public List<Transform> checkpoints = new List<Transform>();
         }
 
         [Header("UI References")]
@@ -39,6 +43,14 @@ namespace RacingUI
         public EzerealCarController playerCar;
         public EzerealCarController aiCar; // Может быть пустым, если гонка одиночная
 
+        [Header("Checkpoints (Containers)")]
+        [Tooltip("Контейнер чекпоинтов для игрока (перетащить сюда родительский объект с кубами)")]
+        public Transform playerWaypointsContainer;
+        [Tooltip("Контейнер чекпоинтов для бота (перетащить сюда родительский объект с кубами)")]
+        public Transform aiWaypointsContainer;
+        [Tooltip("Контейнер общих чекпоинтов, которые должны проходить и игрок, и бот")]
+        public Transform commonWaypointsContainer;
+
         [Header("Track Data Settings")]
         public string trackId = "Track_Forest";
         public int totalLaps = 3;
@@ -48,7 +60,6 @@ namespace RacingUI
         public bool isRaceFinished = false;
 
         private List<ParticipantState> participants = new List<ParticipantState>();
-        private int totalCheckpoints = 0;
 
         private void Awake()
         {
@@ -63,11 +74,11 @@ namespace RacingUI
             // 1. Загружаем параметры трассы из базы данных
             LoadTrackDataFromDatabase();
 
-            // 2. Автоматически находим и настраиваем вейпоинты
-            AutoSetupWaypoints();
-
-            // 3. Инициализируем список участников гонки
+            // 2. Инициализируем список участников гонки
             InitializeParticipants();
+
+            // 3. Настраиваем и сортируем индивидуальные чекпоинты для каждого участника
+            InitializeCheckpoints();
 
             // 4. Обновляем стартовый интерфейс кругов
             UpdateLapUI();
@@ -90,65 +101,6 @@ namespace RacingUI
                     }
                     Debug.Log($"[RaceManager] Данные трассы '{trackId}' загружены из БД: Кругов={totalLaps}");
                 }
-            }
-        }
-
-        private void AutoSetupWaypoints()
-        {
-            // Ищем контейнер с именем "waypoints" или содержащим "waypoint"
-            GameObject container = null;
-            foreach (var go in FindObjectsOfType<GameObject>(true))
-            {
-                if ((go.name.ToLower() == "waypoints" || go.name.ToLower().Contains("waypoint")) && go.transform.parent == null)
-                {
-                    container = go;
-                    break;
-                }
-            }
-
-            if (container != null)
-            {
-                int index = 0;
-                foreach (Transform child in container.transform)
-                {
-                    RaceWaypoint wp = child.GetComponent<RaceWaypoint>();
-                    if (wp == null)
-                    {
-                        wp = child.gameObject.AddComponent<RaceWaypoint>();
-                    }
-                    wp.waypointIndex = index;
-
-                    // Настраиваем коллайдер как триггер
-                    Collider col = child.GetComponent<Collider>();
-                    if (col != null)
-                    {
-                        col.isTrigger = true;
-                    }
-                    else
-                    {
-                        BoxCollider box = child.gameObject.AddComponent<BoxCollider>();
-                        box.isTrigger = true;
-                    }
-
-                    // Скрываем видимость кубика в игре (чтобы они были невидимыми триггерами)
-                    MeshRenderer renderer = child.GetComponent<MeshRenderer>();
-                    if (renderer != null)
-                    {
-                        renderer.enabled = false;
-                    }
-
-                    index++;
-                }
-                totalCheckpoints = index;
-                Debug.Log($"[RaceManager] Автоматически настроено {totalCheckpoints} вейпоинтов из контейнера '{container.name}'");
-            }
-            else
-            {
-                // Поиск по сцене, если нет общего родителя
-                RaceWaypoint[] wps = FindObjectsOfType<RaceWaypoint>();
-                System.Array.Sort(wps, (a, b) => a.waypointIndex.CompareTo(b.waypointIndex));
-                totalCheckpoints = wps.Length;
-                Debug.LogWarning($"[RaceManager] Контейнер 'waypoints' не найден в корне. Найдено {totalCheckpoints} компонентов RaceWaypoint на сцене.");
             }
         }
 
@@ -183,6 +135,110 @@ namespace RacingUI
                     isPlayer = false
                 });
             }
+        }
+
+        private void InitializeCheckpoints()
+        {
+            foreach (var p in participants)
+            {
+                Transform specificContainer = p.isPlayer ? playerWaypointsContainer : aiWaypointsContainer;
+                InitializeCheckpointsForState(p, specificContainer);
+            }
+        }
+
+        private void InitializeCheckpointsForState(ParticipantState state, Transform specificContainer)
+        {
+            state.checkpoints.Clear();
+
+            // 1. Добавляем специфичные чекпоинты из контейнера
+            if (specificContainer != null)
+            {
+                foreach (Transform child in specificContainer)
+                {
+                    state.checkpoints.Add(child);
+                    ConfigureCheckpointTrigger(child);
+                }
+            }
+
+            // 2. Добавляем общие чекпоинты
+            if (commonWaypointsContainer != null)
+            {
+                foreach (Transform child in commonWaypointsContainer)
+                {
+                    state.checkpoints.Add(child);
+                    ConfigureCheckpointTrigger(child);
+                }
+            }
+
+            // 3. Если никакие контейнеры не перетащены, ищем все вейпоинты на сцене в качестве резервной логики
+            if (state.checkpoints.Count == 0)
+            {
+                RaceWaypoint[] allWps = FindObjectsOfType<RaceWaypoint>();
+                foreach (var wp in allWps)
+                {
+                    state.checkpoints.Add(wp.transform);
+                }
+            }
+
+            // 4. Сортируем чекпоинты по индексу/имени, чтобы порядок прохождения был верным
+            state.checkpoints.Sort((a, b) => GetWaypointSortIndex(a).CompareTo(GetWaypointSortIndex(b)));
+
+            // 5. Убеждаемся, что на каждом чекпоинте висит скрипт RaceWaypoint
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int i = 0; i < state.checkpoints.Count; i++)
+            {
+                var t = state.checkpoints[i];
+                RaceWaypoint rw = t.GetComponent<RaceWaypoint>();
+                if (rw == null) rw = t.gameObject.AddComponent<RaceWaypoint>();
+                rw.waypointIndex = i;
+                sb.Append($"{t.name} (порядок {i}), ");
+            }
+
+            Debug.Log($"[RaceManager] Для {state.name} инициализировано {state.checkpoints.Count} чекпоинтов: {sb.ToString()}");
+        }
+
+        private void ConfigureCheckpointTrigger(Transform t)
+        {
+            // Настраиваем коллайдер как триггер
+            Collider col = t.GetComponent<Collider>();
+            if (col != null)
+            {
+                col.isTrigger = true;
+            }
+            else
+            {
+                BoxCollider box = t.gameObject.AddComponent<BoxCollider>();
+                box.isTrigger = true;
+            }
+
+            // Скрываем видимость кубика в игре (чтобы они были невидимыми триггерами)
+            MeshRenderer renderer = t.GetComponent<MeshRenderer>();
+            if (renderer != null)
+            {
+                renderer.enabled = false;
+            }
+        }
+
+        private int GetWaypointSortIndex(Transform t)
+        {
+            // 1. Если на объекте уже есть скрипт RaceWaypoint, используем его индекс
+            RaceWaypoint rw = t.GetComponent<RaceWaypoint>();
+            if (rw != null) return rw.waypointIndex;
+
+            // 2. Пытаемся извлечь число из имени объекта (например, "Waypoint (5)" -> 5)
+            string name = t.name;
+            string digits = "";
+            foreach (char c in name)
+            {
+                if (char.IsDigit(c)) digits += c;
+            }
+            if (!string.IsNullOrEmpty(digits))
+            {
+                if (int.TryParse(digits, out int index)) return index;
+            }
+
+            // 3. Если чисел нет, возвращаем его индекс в иерархии родителя
+            return t.GetSiblingIndex();
         }
 
         public void StartRaceSequence()
@@ -263,16 +319,20 @@ namespace RacingUI
         }
 
         // Вызывается из триггера вейпоинта
-        public void OnCarPassedWaypoint(EzerealCarController car, int waypointIndex)
+        public void OnCarPassedWaypoint(EzerealCarController car, Transform waypointTransform)
         {
             ParticipantState state = GetParticipantState(car);
             if (state == null || state.hasFinished) return;
 
-            // Если машина пересекает следующий по порядку вейпоинт
-            if (waypointIndex == state.nextCheckpointIndex)
+            // Если машина пересекает следующий по порядку вейпоинт из своего списка
+            if (state.nextCheckpointIndex < state.checkpoints.Count)
             {
-                state.nextCheckpointIndex++;
-                Debug.Log($"[RaceManager] {state.name} прошел чекпоинт {waypointIndex + 1}/{totalCheckpoints}");
+                Transform expected = state.checkpoints[state.nextCheckpointIndex];
+                if (waypointTransform == expected)
+                {
+                    state.nextCheckpointIndex++;
+                    Debug.Log($"[RaceManager] {state.name} прошел чекпоинт {state.nextCheckpointIndex}/{state.checkpoints.Count}");
+                }
             }
         }
 
@@ -285,7 +345,7 @@ namespace RacingUI
             if (state == null || state.hasFinished) return;
 
             // Проверяем, прошел ли участник все чекпоинты (или если чекпоинтов на сцене нет вообще)
-            if (totalCheckpoints == 0 || state.nextCheckpointIndex >= totalCheckpoints)
+            if (state.checkpoints.Count == 0 || state.nextCheckpointIndex >= state.checkpoints.Count)
             {
                 float completedLapTime = state.currentLapTime;
 
@@ -342,7 +402,7 @@ namespace RacingUI
             }
             else
             {
-                Debug.LogWarning($"[RaceManager] {state.name} пересек линию финиша, но не прошел все чекпоинты! Пройдено: {state.nextCheckpointIndex}/{totalCheckpoints}");
+                Debug.LogWarning($"[RaceManager] {state.name} пересек линию финиша, но не прошел все чекпоинты! Пройдено: {state.nextCheckpointIndex}/{state.checkpoints.Count}");
             }
         }
 
@@ -380,6 +440,17 @@ namespace RacingUI
             foreach (var p in participants)
             {
                 if (p.car == car) return p;
+            }
+            return null;
+        }
+
+        // Возвращает текущий активный вейпоинт для игрока
+        public Transform GetPlayerTargetCheckpoint()
+        {
+            ParticipantState playerState = GetPlayerState();
+            if (playerState != null && playerState.nextCheckpointIndex < playerState.checkpoints.Count)
+            {
+                return playerState.checkpoints[playerState.nextCheckpointIndex];
             }
             return null;
         }
