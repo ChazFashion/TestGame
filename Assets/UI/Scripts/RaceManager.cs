@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.InputSystem;
 using TMPro;
 using System.Collections;
 using System.Collections.Generic;
@@ -59,6 +61,11 @@ namespace RacingUI
         public bool isRaceStarted = false;
         public bool isRaceFinished = false;
 
+        [Header("Pause Settings")]
+        [Tooltip("Панель меню паузы. Если не назначена, будет создана автоматически.")]
+        public GameObject pausePanel;
+        [HideInInspector] public bool isPaused = false;
+
         private List<ParticipantState> participants = new List<ParticipantState>();
 
         private void Awake()
@@ -83,13 +90,23 @@ namespace RacingUI
             // 4. Обновляем стартовый интерфейс кругов
             UpdateLapUI();
 
-            // 5. Запускаем стартовый отсчет
+            // 5. Инициализируем панель паузы, если она не задана вручную
+            if (pausePanel == null)
+            {
+                CreateDefaultPausePanel();
+            }
+            else
+            {
+                pausePanel.SetActive(false);
+            }
+
+            // 6. Запускаем стартовый отсчет
             StartRaceSequence();
         }
 
         private void LoadTrackDataFromDatabase()
         {
-            DataManager dm = FindObjectOfType<DataManager>();
+            DataManager dm = FindAnyObjectByType<DataManager>();
             if (dm != null)
             {
                 var trackInfo = dm.GetTrackInfo(trackId);
@@ -173,7 +190,7 @@ namespace RacingUI
             // 3. Если никакие контейнеры не перетащены, ищем все вейпоинты на сцене в качестве резервной логики
             if (state.checkpoints.Count == 0)
             {
-                RaceWaypoint[] allWps = FindObjectsOfType<RaceWaypoint>();
+                RaceWaypoint[] allWps = FindObjectsByType<RaceWaypoint>(FindObjectsSortMode.None);
                 foreach (var wp in allWps)
                 {
                     state.checkpoints.Add(wp.transform);
@@ -271,6 +288,39 @@ namespace RacingUI
 
         private void Update()
         {
+            // 0. Обработка клавиши паузы (через новый Input System)
+            if (!isRaceFinished)
+            {
+                bool pausePressed = false;
+
+                // Клавиатура: Escape или P
+                if (Keyboard.current != null)
+                {
+                    pausePressed = Keyboard.current.escapeKey.wasPressedThisFrame 
+                                || Keyboard.current.pKey.wasPressedThisFrame;
+                }
+
+                // Геймпад: кнопка Start
+                if (!pausePressed && Gamepad.current != null)
+                {
+                    pausePressed = Gamepad.current.startButton.wasPressedThisFrame;
+                }
+
+                if (pausePressed)
+                {
+                    if (isPaused)
+                    {
+                        ResumeRace();
+                    }
+                    else
+                    {
+                        PauseRace();
+                    }
+                }
+            }
+
+            if (isPaused) return;
+
             // 1. Логика таймера гонки
             if (isRaceStarted && !isRaceFinished)
             {
@@ -392,7 +442,7 @@ namespace RacingUI
                         FinishRace(rank);
 
                         // Сохраняем лучший круг в БД
-                        DataManager dm = FindObjectOfType<DataManager>();
+                        DataManager dm = FindAnyObjectByType<DataManager>();
                         if (dm != null && state.bestLapTime != float.MaxValue)
                         {
                             dm.SaveRaceRecord(trackId, state.bestLapTime);
@@ -514,11 +564,15 @@ namespace RacingUI
 
         public void RestartRace()
         {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
             UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
         }
 
         public void ExitToMenu()
         {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
             UnityEngine.SceneManagement.SceneManager.LoadScene("Scene_Menu");
         }
 
@@ -535,7 +589,7 @@ namespace RacingUI
                     playerCar.vehicleRB.isKinematic = (freeze && isRaceFinished); 
                     if (freeze)
                     {
-                        playerCar.vehicleRB.velocity = Vector3.zero;
+                        playerCar.vehicleRB.linearVelocity = Vector3.zero;
                         playerCar.vehicleRB.angularVelocity = Vector3.zero;
                     }
                 }
@@ -552,7 +606,7 @@ namespace RacingUI
                     aiCar.vehicleRB.isKinematic = (freeze && isRaceFinished);
                     if (freeze)
                     {
-                        aiCar.vehicleRB.velocity = Vector3.zero;
+                        aiCar.vehicleRB.linearVelocity = Vector3.zero;
                         aiCar.vehicleRB.angularVelocity = Vector3.zero;
                     }
                 }
@@ -566,6 +620,167 @@ namespace RacingUI
                     }
                 }
             }
+        }
+
+        private void CreateDefaultPausePanel()
+        {
+            // 1. Создаем ОТДЕЛЬНЫЙ Canvas для паузы с гарантированными настройками
+            GameObject canvasObj = new GameObject("PauseCanvas");
+            Canvas canvas = canvasObj.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 999; // Поверх всех остальных Canvas на сцене
+
+            CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            canvasObj.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+
+            // 2. Создаем затемняющий задний фон (Overlay)
+            GameObject overlayObj = new GameObject("PauseOverlay");
+            overlayObj.transform.SetParent(canvas.transform, false);
+            
+            UnityEngine.UI.Image overlayImage = overlayObj.AddComponent<UnityEngine.UI.Image>();
+            overlayImage.color = new Color(0.02f, 0.02f, 0.03f, 0.65f); // Полупрозрачный темный фон
+            
+            RectTransform overlayRect = overlayObj.GetComponent<RectTransform>();
+            overlayRect.anchorMin = Vector2.zero;
+            overlayRect.anchorMax = Vector2.one;
+            overlayRect.sizeDelta = Vector2.zero;
+
+            // 3. Создаем карточку меню (Menu Card) по центру
+            GameObject cardObj = new GameObject("PauseCard");
+            cardObj.transform.SetParent(overlayObj.transform, false);
+
+            UnityEngine.UI.Image cardImage = cardObj.AddComponent<UnityEngine.UI.Image>();
+            cardImage.color = new Color(0.07f, 0.08f, 0.1f, 0.97f); // Темная тема с легким синим оттенком
+
+            RectTransform cardRect = cardObj.GetComponent<RectTransform>();
+            cardRect.sizeDelta = new Vector2(380, 280);
+            cardRect.anchoredPosition = Vector2.zero;
+
+            // Добавляем красивую неоновую полоску сверху карточки
+            GameObject accentLine = new GameObject("AccentLine");
+            accentLine.transform.SetParent(cardObj.transform, false);
+            UnityEngine.UI.Image accentImage = accentLine.AddComponent<UnityEngine.UI.Image>();
+            accentImage.color = new Color(0.0f, 0.7f, 1.0f, 1.0f); // Яркий неоновый голубой цвет
+
+            RectTransform accentRect = accentLine.GetComponent<RectTransform>();
+            accentRect.anchorMin = new Vector2(0, 1);
+            accentRect.anchorMax = new Vector2(1, 1);
+            accentRect.pivot = new Vector2(0.5f, 1f);
+            accentRect.sizeDelta = new Vector2(0, 4);
+            accentRect.anchoredPosition = Vector2.zero;
+
+            // 4. Создаем Заголовок "ПАУЗА"
+            GameObject titleObj = new GameObject("TitleText");
+            titleObj.transform.SetParent(cardObj.transform, false);
+            TMP_Text titleText = titleObj.AddComponent<TextMeshProUGUI>();
+            titleText.text = "ПАУЗА";
+            titleText.fontSize = 32;
+            titleText.alignment = TextAlignmentOptions.Center;
+            titleText.color = Color.white;
+            titleText.fontStyle = FontStyles.Bold;
+            
+            RectTransform titleRect = titleObj.GetComponent<RectTransform>();
+            titleRect.sizeDelta = new Vector2(300, 60);
+            titleRect.anchoredPosition = new Vector2(0, 70);
+
+            // 5. Создаем кнопку "ПРОДОЛЖИТЬ"
+            CreateButton(cardObj.transform, "Btn_Resume", "ПРОДОЛЖИТЬ", new Vector2(0, -10), () => ResumeRace());
+            
+            // 6. Создаем кнопку "ВЫЙТИ ИЗ ГОНКИ"
+            CreateButton(cardObj.transform, "Btn_Exit", "ВЫЙТИ ИЗ ГОНКИ", new Vector2(0, -75), () => ExitToMenuFromPause());
+
+            pausePanel = overlayObj;
+            pausePanel.SetActive(false);
+        }
+
+        private void CreateButton(Transform parent, string name, string label, Vector2 pos, UnityEngine.Events.UnityAction onClickAction)
+        {
+            GameObject btnObj = new GameObject(name);
+            btnObj.transform.SetParent(parent, false);
+
+            RectTransform btnRect = btnObj.AddComponent<RectTransform>();
+            btnRect.sizeDelta = new Vector2(280, 45);
+            btnRect.anchoredPosition = pos;
+
+            UnityEngine.UI.Image img = btnObj.AddComponent<UnityEngine.UI.Image>();
+            img.color = new Color(0.15f, 0.16f, 0.2f, 1.0f); // Спокойный серый цвет кнопки
+
+            UnityEngine.UI.Button btn = btnObj.AddComponent<UnityEngine.UI.Button>();
+            btn.transition = UnityEngine.UI.Selectable.Transition.ColorTint;
+            
+            var colors = btn.colors;
+            colors.normalColor = new Color(0.15f, 0.16f, 0.2f, 1.0f);
+            colors.highlightedColor = new Color(0.0f, 0.5f, 1.0f, 1.0f); // Неоновый голубой при наведении
+            colors.pressedColor = new Color(0.0f, 0.35f, 0.7f, 1.0f);
+            colors.selectedColor = new Color(0.0f, 0.5f, 1.0f, 1.0f);
+            btn.colors = colors;
+
+            btn.onClick.AddListener(onClickAction);
+
+            // Добавляем текст на кнопку
+            GameObject txtObj = new GameObject("Text");
+            txtObj.transform.SetParent(btnObj.transform, false);
+            TMP_Text txt = txtObj.AddComponent<TextMeshProUGUI>();
+            txt.text = label;
+            txt.fontSize = 15;
+            txt.alignment = TextAlignmentOptions.Center;
+            txt.color = Color.white;
+            txt.fontStyle = FontStyles.Bold;
+
+            RectTransform txtRect = txtObj.GetComponent<RectTransform>();
+            txtRect.anchorMin = Vector2.zero;
+            txtRect.anchorMax = Vector2.one;
+            txtRect.sizeDelta = Vector2.zero;
+        }
+
+        public void PauseRace()
+        {
+            if (isRaceFinished) return;
+            isPaused = true;
+            Time.timeScale = 0f;
+            AudioListener.pause = true;
+
+            if (pausePanel != null)
+            {
+                pausePanel.SetActive(true);
+                
+                // Выделяем первую кнопку для удобного управления с клавиатуры/геймпада
+                UnityEngine.UI.Button firstBtn = pausePanel.GetComponentInChildren<UnityEngine.UI.Button>();
+                if (firstBtn != null && UnityEngine.EventSystems.EventSystem.current != null)
+                {
+                    UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(null);
+                    UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(firstBtn.gameObject);
+                }
+            }
+
+            Cursor.visible = true;
+            Cursor.lockState = CursorLockMode.None;
+        }
+
+        public void ResumeRace()
+        {
+            isPaused = false;
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+
+            if (pausePanel != null)
+            {
+                pausePanel.SetActive(false);
+            }
+
+            Cursor.visible = false;
+            Cursor.lockState = CursorLockMode.Locked;
+        }
+
+        public void ExitToMenuFromPause()
+        {
+            Time.timeScale = 1f;
+            AudioListener.pause = false;
+            ExitToMenu();
         }
     }
 }
