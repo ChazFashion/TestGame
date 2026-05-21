@@ -46,7 +46,7 @@ public class AICarDriver : MonoBehaviour
     [SerializeField] private float currentSpeedKmh = 0f;
     [SerializeField] private float targetSpeedKmh = 0f;
     [SerializeField] private float currentDistanceAlongSpline = 0f;
-    [SerializeField] private bool hasLoadedFromDB = false;
+    public bool hasLoadedFromDB = false;
 
     private EzerealCarController car;
     private Rigidbody rb;
@@ -109,7 +109,7 @@ public class AICarDriver : MonoBehaviour
 
     private void LoadProfileFromDatabase()
     {
-        DataManager dm = FindObjectOfType<DataManager>();
+        DataManager dm = FindAnyObjectByType<DataManager>();
         if (dm != null)
         {
             var profile = dm.GetBotProfileByName(botName);
