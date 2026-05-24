@@ -5227,7 +5227,7 @@ MonoBehaviour:
   aiWaypointsContainer: {fileID: 0}
   commonWaypointsContainer: {fileID: 1721228707}
   trackId: Track_Forest
-  totalLaps: 3
+  totalLaps: 2
   isRaceStarted: 0
   isRaceFinished: 0
   pausePanel: {fileID: 0}
