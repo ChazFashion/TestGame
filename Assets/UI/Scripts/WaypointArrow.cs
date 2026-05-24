@@ -6,15 +6,38 @@ namespace RacingUI
     public class WaypointArrow : MonoBehaviour
     {
         [Header("Settings")]
-        public Transform arrowModel;      // Для 3D стрелки (можно оставить пустым)
-        public RectTransform uiArrow;     // Для стрелки на экране (Канвас)
+        public Transform arrowModel;      // For 3D arrow (can be null)
+        public RectTransform uiArrow;     // For UI arrow on Canvas
         public float rotationSpeed = 10f; 
         public float lookDistance = 10f;  
+        [Tooltip("Sprite rotation offset in degrees (e.g. 90, 180, -90) if it doesn't point UP by default.")]
+        public float spriteRotationOffset = 0f;
+        [Tooltip("Invert rotation direction if the arrow turns the wrong way.")]
+        public bool invertRotation = false;
+
+        [Header("GPS Navigation Mode")]
+        [Tooltip("If enabled, the arrow will track AI waypoints ahead of the player to act as a GPS road guide.")]
+        public bool useGpsMode = true;
+        [Tooltip("How many waypoints ahead to look. Higher values make the rotation smoother.")]
+        public int gpsLookAhead = 3;
+
+        [Header("Space Reference")]
+        [Tooltip("Use Main Camera orientation. If disabled, uses the player car's forward direction directly (recommended).")]
+        public bool useCameraSpace = false;
+
+        [Header("Target Player")]
+        [Tooltip("Player Transform. If null, automatically searches via RaceManager or player tag.")]
+        public Transform playerTransform; 
 
         [Header("Track Data")]
+        [Tooltip("Container holding AI spline nodes. Required for GPS mode.")]
         public Transform waypointContainer; 
         private List<Transform> nodes = new List<Transform>();
         private int currentNodeIndex = 0;
+
+        private Camera cachedCamera;
+        private Transform lastTargetNode;
+        private float logTimer = 0f;
 
         void Start()
         {
@@ -25,55 +48,239 @@ namespace RacingUI
                     nodes.Add(child);
                 }
             }
+
+            if (playerTransform == null)
+            {
+                FindPlayerTransform();
+            }
+
+            ResolveActualCarTransform();
+
+            FindMainCamera();
+        }
+
+        void ResolveActualCarTransform()
+        {
+            if (playerTransform != null)
+            {
+                // If user dragged a static empty parent or sibling object,
+                // automatically resolve it to the actual moving car object in its hierarchy.
+                var car = playerTransform.GetComponent<Ezereal.EzerealCarController>();
+                if (car == null) car = playerTransform.GetComponentInChildren<Ezereal.EzerealCarController>();
+                if (car == null && playerTransform.parent != null)
+                {
+                    car = playerTransform.parent.GetComponentInChildren<Ezereal.EzerealCarController>();
+                }
+                if (car == null) car = playerTransform.GetComponentInParent<Ezereal.EzerealCarController>();
+
+                if (car != null)
+                {
+                    // Find the Rigidbody, which is by definition the physically moving body of the car
+                    Rigidbody rb = car.GetComponent<Rigidbody>();
+                    if (rb == null) rb = car.GetComponentInChildren<Rigidbody>();
+                    if (rb == null && car.transform.parent != null)
+                    {
+                        rb = car.transform.parent.GetComponentInChildren<Rigidbody>();
+                    }
+                    if (rb == null) rb = car.GetComponentInParent<Rigidbody>();
+
+                    if (rb != null)
+                    {
+                        playerTransform = rb.transform;
+                        Debug.Log("[WaypointArrow] Corrected Player Transform to moving Rigidbody: " + playerTransform.name);
+                    }
+                    else
+                    {
+                        playerTransform = car.transform;
+                        Debug.Log("[WaypointArrow] Corrected Player Transform to active car object: " + playerTransform.name);
+                    }
+                }
+            }
+        }
+
+        void FindMainCamera()
+        {
+            if (Camera.main != null)
+            {
+                cachedCamera = Camera.main;
+            }
+            else
+            {
+                cachedCamera = FindAnyObjectByType<Camera>();
+                if (cachedCamera != null)
+                {
+                    Debug.LogWarning("[WaypointArrow] Camera.main not found! Using fallback: " + cachedCamera.name);
+                }
+            }
+        }
+
+        void FindPlayerTransform()
+        {
+            // 1. Try to find via RaceManager
+            if (RaceManager.Instance != null && RaceManager.Instance.playerCar != null)
+            {
+                playerTransform = RaceManager.Instance.playerCar.transform;
+                Debug.Log("[WaypointArrow] Player transform found via RaceManager: " + playerTransform.name);
+                return;
+            }
+
+            // 2. Try to find via EzerealCarController component (non-AI)
+            var cars = FindObjectsByType<Ezereal.EzerealCarController>(FindObjectsSortMode.None);
+            foreach (var car in cars)
+            {
+                if (car.GetComponentInChildren<AICarDriver>() == null && car.GetComponentInParent<AICarDriver>() == null)
+                {
+                    playerTransform = car.transform;
+                    Debug.Log("[WaypointArrow] Player transform found via EzerealCarController: " + playerTransform.name);
+                    return;
+                }
+            }
+
+            // 3. Fallback to Player tag
+            GameObject playerObj = GameObject.FindWithTag("Player");
+            if (playerObj != null)
+            {
+                var car = playerObj.GetComponentInChildren<Ezereal.EzerealCarController>();
+                if (car == null) car = playerObj.GetComponentInParent<Ezereal.EzerealCarController>();
+                playerTransform = car != null ? car.transform : playerObj.transform;
+                Debug.Log("[WaypointArrow] Player transform found via tag: " + playerTransform.name);
+            }
+        }
+
+        int GetClosestNodeIndex(Vector3 position)
+        {
+            if (nodes.Count == 0) return 0;
+            
+            int closest = 0;
+            float minDist = float.MaxValue;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                float dist = Vector3.Distance(position, nodes[i].position);
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    closest = i;
+                }
+            }
+            return closest;
         }
 
         void Update()
         {
-            Transform targetNode = null;
-
-            // Синхронизируем цель стрелки с текущим активным чекпоинтом из RaceManager
-            if (RaceManager.Instance != null)
+            // If player transform is still not found, try searching
+            if (playerTransform == null)
             {
-                targetNode = RaceManager.Instance.GetPlayerTargetCheckpoint();
+                FindPlayerTransform();
+                if (playerTransform == null) return; 
             }
 
-            // Если гонка не активна или нет вейпоинта от менеджера, берем из локального списка (свободная езда)
-            if (targetNode == null)
+            Transform targetNode = null;
+
+            if (useGpsMode && nodes.Count > 0)
             {
-                if (nodes.Count == 0) return;
-                targetNode = nodes[currentNodeIndex];
-
-                // Переключение по дистанции в режиме свободной езды
-                Vector3 flatPos = new Vector3(transform.position.x, 0, transform.position.z);
-                Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
-
-                if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
+                // GPS Mode: track AI waypoints ahead of the player position
+                int closestIndex = GetClosestNodeIndex(playerTransform.position);
+                int targetIndex = (closestIndex + gpsLookAhead) % nodes.Count;
+                targetNode = nodes[targetIndex];
+            }
+            else
+            {
+                // Checkpoint Mode: track player's current checkpoint from RaceManager
+                if (RaceManager.Instance != null)
                 {
-                    Debug.Log("--- ПРОЙДЕНО (Свободная езда): " + nodes[currentNodeIndex].name + " ---");
-                    currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
+                    targetNode = RaceManager.Instance.GetPlayerTargetCheckpoint();
+                }
+
+                // Fallback for free ride (sequentially track nodes list)
+                if (targetNode == null)
+                {
+                    if (nodes.Count == 0) return;
+                    targetNode = nodes[currentNodeIndex];
+
+                    // Distance switch for free ride mode
+                    Vector3 flatPos = new Vector3(playerTransform.position.x, 0, playerTransform.position.z);
+                    Vector3 flatTarget = new Vector3(targetNode.position.x, 0, targetNode.position.z);
+
+                    if (Vector3.Distance(flatPos, flatTarget) < lookDistance)
+                    {
+                        Debug.Log("--- NODE PASSED (Free Ride): " + nodes[currentNodeIndex].name + " ---");
+                        currentNodeIndex = (currentNodeIndex + 1) % nodes.Count;
+                    }
                 }
             }
 
-            Vector3 direction = targetNode.position - transform.position;
+            // Hide the UI arrow if there is no active target node (e.g. race finished)
+            if (targetNode == null)
+            {
+                if (uiArrow != null) uiArrow.gameObject.SetActive(false);
+                return;
+            }
+            else
+            {
+                if (uiArrow != null) uiArrow.gameObject.SetActive(true);
+            }
 
-            // --- ЛОГИКА ДЛЯ 3D СТРЕЛКИ ---
+            // Log target node updates for debugging
+            if (targetNode != lastTargetNode)
+            {
+                Debug.Log($"[WaypointArrow] Target changed! New target: {targetNode.name}");
+                lastTargetNode = targetNode;
+            }
+
+            // Find camera if missing and useCameraSpace is enabled
+            if (useCameraSpace && cachedCamera == null)
+            {
+                FindMainCamera();
+            }
+
+            // Compute direction to target
+            Vector3 direction = targetNode.position - playerTransform.position;
+
+            // --- 3D MODEL ARROW LOGIC ---
             if (arrowModel != null)
             {
-                // Стрелка смотрит прямо на цель в 3D
                 Quaternion targetRot = Quaternion.LookRotation(direction);
                 arrowModel.rotation = Quaternion.Slerp(arrowModel.rotation, targetRot, Time.deltaTime * rotationSpeed);
             }
 
-            // --- ЛОГИКА ДЛЯ UI СТРЕЛКИ (Канвас) ---
+            // --- UI CANVAS ARROW LOGIC ---
             if (uiArrow != null)
             {
-                Vector3 localDir = transform.InverseTransformDirection(direction);
-                float angle = Mathf.Atan2(localDir.x, localDir.z) * Mathf.Rad2Deg;
-                uiArrow.localRotation = Quaternion.Slerp(uiArrow.localRotation, Quaternion.Euler(0, 0, -angle), Time.deltaTime * rotationSpeed);
+                // Select coordinate space (Camera or Player Car)
+                Transform refTransform = (useCameraSpace && cachedCamera != null) ? cachedCamera.transform : playerTransform;
+
+                // Project directions to horizontal plane (XZ)
+                Vector3 flatDir = new Vector3(direction.x, 0, direction.z).normalized;
+                Vector3 refForward = new Vector3(refTransform.forward.x, 0, refTransform.forward.z).normalized;
+                Vector3 refRight = new Vector3(refTransform.right.x, 0, refTransform.right.z).normalized;
+
+                // Dot product project direction onto horizontal forward/right axes
+                float forwardDist = Vector3.Dot(flatDir, refForward);
+                float rightDist = Vector3.Dot(flatDir, refRight);
+
+                // Compute angle [-180, 180]
+                float angle = Mathf.Atan2(rightDist, forwardDist) * Mathf.Rad2Deg;
+
+                // Rotate the UI Arrow
+                float targetZRotation = (invertRotation ? angle : -angle) + spriteRotationOffset;
+                uiArrow.localRotation = Quaternion.Slerp(
+                    uiArrow.localRotation, 
+                    Quaternion.Euler(0, 0, targetZRotation), 
+                    Time.deltaTime * rotationSpeed
+                );
+
+                // Diagnostic log
+                logTimer += Time.deltaTime;
+                if (logTimer >= 1f)
+                {
+                    logTimer = 0f;
+                    Transform spaceRef = (useCameraSpace && cachedCamera != null) ? cachedCamera.transform : playerTransform;
+                    Debug.Log($"[ArrowDiag] Игрок: {playerTransform.name} (поз={playerTransform.position}), Цель: {targetNode.name} (поз={targetNode.position}), Ориентир: {spaceRef.name} (поз={spaceRef.position}, rot={spaceRef.rotation.eulerAngles}), Угол Z={targetZRotation}");
+                }
             }
         }
 
-        // РИСУЕМ ЛИНИИ В ОКНЕ SCENE ДЛЯ ПРОВЕРКИ
+        // Draw debug lines in Scene window
         private void OnDrawGizmos()
         {
             if (waypointContainer == null) return;
@@ -83,15 +290,30 @@ namespace RacingUI
             foreach (Transform child in waypointContainer)
             {
                 if (lastPoint != null) Gizmos.DrawLine(lastPoint.position, child.position);
-                Gizmos.DrawWireSphere(child.position, 1f);
+                Gizmos.DrawWireSphere(child.position, 0.5f);
                 lastPoint = child;
             }
 
-            // Рисуем линию к текущей цели красным цветом
-            if (Application.isPlaying && nodes.Count > 0)
+            if (Application.isPlaying && playerTransform != null)
             {
-                Gizmos.color = Color.red;
-                Gizmos.DrawLine(transform.position, nodes[currentNodeIndex].position);
+                Transform targetNode = null;
+                if (useGpsMode && nodes.Count > 0)
+                {
+                    int closestIndex = GetClosestNodeIndex(playerTransform.position);
+                    int targetIndex = (closestIndex + gpsLookAhead) % nodes.Count;
+                    targetNode = nodes[targetIndex];
+                }
+                else
+                {
+                    if (RaceManager.Instance != null) targetNode = RaceManager.Instance.GetPlayerTargetCheckpoint();
+                    if (targetNode == null && nodes.Count > 0) targetNode = nodes[currentNodeIndex];
+                }
+
+                if (targetNode != null)
+                {
+                    Gizmos.color = Color.red;
+                    Gizmos.DrawLine(playerTransform.position, targetNode.position);
+                }
             }
         }
     }

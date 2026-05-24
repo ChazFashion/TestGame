@@ -208,10 +208,13 @@ namespace RacingUI
                 RaceWaypoint rw = t.GetComponent<RaceWaypoint>();
                 if (rw == null) rw = t.gameObject.AddComponent<RaceWaypoint>();
                 rw.waypointIndex = i;
-                sb.Append($"{t.name} (порядок {i}), ");
+                
+                Collider col = t.GetComponent<Collider>();
+                string colInfo = col != null ? $"Коллайдер (Trigger={col.isTrigger})" : "НЕТ КОЛЛАЙДЕРА";
+                sb.Append($"- [{i}] {t.name}: {colInfo}, Позиция: {t.position}\n");
             }
 
-            Debug.Log($"[RaceManager] Для {state.name} инициализировано {state.checkpoints.Count} чекпоинтов: {sb.ToString()}");
+            Debug.Log($"[RaceManager] Для {state.name} инициализировано {state.checkpoints.Count} чекпоинтов:\n{sb.ToString()}");
         }
 
         private void ConfigureCheckpointTrigger(Transform t)
@@ -238,11 +241,7 @@ namespace RacingUI
 
         private int GetWaypointSortIndex(Transform t)
         {
-            // 1. Если на объекте уже есть скрипт RaceWaypoint, используем его индекс
-            RaceWaypoint rw = t.GetComponent<RaceWaypoint>();
-            if (rw != null) return rw.waypointIndex;
-
-            // 2. Пытаемся извлечь число из имени объекта (например, "Waypoint (5)" -> 5)
+            // Пытаемся извлечь число из имени объекта (например, "Waypoint (5)" -> 5)
             string name = t.name;
             string digits = "";
             foreach (char c in name)
@@ -254,7 +253,7 @@ namespace RacingUI
                 if (int.TryParse(digits, out int index)) return index;
             }
 
-            // 3. Если чисел нет, возвращаем его индекс в иерархии родителя
+            // Если чисел нет, возвращаем его индекс в иерархии родителя
             return t.GetSiblingIndex();
         }
 
