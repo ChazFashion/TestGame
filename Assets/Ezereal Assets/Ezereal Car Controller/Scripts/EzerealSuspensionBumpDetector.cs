@@ -20,6 +20,7 @@ namespace Ezereal
 
         void Update()
         {
+            if (wheelCollider == null) return;
             if (wheelCollider.GetGroundHit(out WheelHit wheelHit))
             {
                 // Check the force applied to the suspension to detect a bump

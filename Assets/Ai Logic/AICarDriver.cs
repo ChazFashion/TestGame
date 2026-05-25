@@ -3,7 +3,7 @@ using Ezereal;   // EzerealCarController
 using RacingUI;  // DataManager
 using AI;        // CatmullRomSpline
 
-[RequireComponent(typeof(EzerealCarController))]
+// [RequireComponent(typeof(EzerealCarController))]
 public class AICarDriver : MonoBehaviour
 {
     [Header("Waypoints")]
@@ -40,13 +40,14 @@ public class AICarDriver : MonoBehaviour
     [Tooltip("Сила прижимного эффекта к дороге (Downforce). Предотвращает переворачивание машины на высоких скоростях.")]
     public float downforce = 5.0f;
     [Tooltip("Вертикальное смещение центра масс (отрицательное значение прижимает центр тяжести ближе к земле).")]
-    public float centerOfMassOffset = -0.5f;
+    public float centerOfMassOffset = -0.15f;
 
     [Header("Debug Info")]
     [SerializeField] private float currentSpeedKmh = 0f;
     [SerializeField] private float targetSpeedKmh = 0f;
     [SerializeField] private float currentDistanceAlongSpline = 0f;
     public bool hasLoadedFromDB = false;
+    private float debugPrintTimer = 0f;
 
     private EzerealCarController car;
     private Rigidbody rb;
@@ -69,7 +70,12 @@ public class AICarDriver : MonoBehaviour
     void Awake()
     {
         car = GetComponent<EzerealCarController>();
+        if (car == null) car = GetComponentInChildren<EzerealCarController>();
+        if (car == null) car = transform.root.GetComponentInChildren<EzerealCarController>();
+
         rb = GetComponent<Rigidbody>();
+        if (rb == null) rb = GetComponentInChildren<Rigidbody>();
+        if (rb == null) rb = transform.root.GetComponentInChildren<Rigidbody>();
 
         // Обязательно переводим бота в режим автомата
         if (car != null)
@@ -109,68 +115,116 @@ public class AICarDriver : MonoBehaviour
 
     private void LoadProfileFromDatabase()
     {
-        DataManager dm = FindAnyObjectByType<DataManager>();
-        if (dm != null)
+        try
         {
-            var profile = dm.GetBotProfileByName(botName);
-            if (profile != null)
+            DataManager dm = FindAnyObjectByType<DataManager>();
+            if (dm != null)
             {
-                skill = System.Convert.ToSingle(profile["skill"]);
-                aggression = System.Convert.ToSingle(profile["aggression"]);
-                hasLoadedFromDB = true;
-                
-                // Загружаем расширенные физические характеристики напрямую из БД
-                if (profile.ContainsKey("max_speed")) 
-                    maxSpeed = System.Convert.ToSingle(profile["max_speed"]);
-                else
-                    maxSpeed = Mathf.Lerp(75f, 110f, skill);
+                var profile = dm.GetBotProfileByName(botName);
+                if (profile != null)
+                {
+                    if (profile.ContainsKey("skill") && profile["skill"] != null)
+                        skill = System.Convert.ToSingle(profile["skill"]);
+                    if (profile.ContainsKey("aggression") && profile["aggression"] != null)
+                        aggression = System.Convert.ToSingle(profile["aggression"]);
+                    hasLoadedFromDB = true;
+                    
+                    // Загружаем расширенные физические характеристики напрямую из БД
+                    if (profile.ContainsKey("max_speed") && profile["max_speed"] != null) 
+                        maxSpeed = System.Convert.ToSingle(profile["max_speed"]);
+                    else
+                        maxSpeed = Mathf.Lerp(75f, 110f, skill);
 
-                if (profile.ContainsKey("grip_boost")) 
-                    aiGripBoost = System.Convert.ToSingle(profile["grip_boost"]);
+                    if (profile.ContainsKey("grip_boost") && profile["grip_boost"] != null) 
+                        aiGripBoost = System.Convert.ToSingle(profile["grip_boost"]);
 
-                if (profile.ContainsKey("downforce")) 
-                    downforce = System.Convert.ToSingle(profile["downforce"]);
+                    if (profile.ContainsKey("downforce") && profile["downforce"] != null) 
+                        downforce = System.Convert.ToSingle(profile["downforce"]);
 
-                if (profile.ContainsKey("handling_offset")) 
-                    centerOfMassOffset = System.Convert.ToSingle(profile["handling_offset"]);
+                    if (profile.ContainsKey("handling_offset") && profile["handling_offset"] != null) 
+                        centerOfMassOffset = System.Convert.ToSingle(profile["handling_offset"]);
 
-                Debug.Log($"[AICarDriver] Загружен профиль бота '{botName}' из БД: " +
-                          $"Skill={skill:F2}, Aggression={aggression:F2}, MaxSpeed={maxSpeed:F1} км/ч, " +
-                          $"GripBoost={aiGripBoost:F2}, Downforce={downforce:F2}, CenterOfMassOffset={centerOfMassOffset:F2}");
+                    Debug.Log($"[AICarDriver] Загружен профиль бота '{botName}' из БД: " +
+                              $"Skill={skill:F2}, Aggression={aggression:F2}, MaxSpeed={maxSpeed:F1} км/ч, " +
+                              $"GripBoost={aiGripBoost:F2}, Downforce={downforce:F2}, CenterOfMassOffset={centerOfMassOffset:F2}");
+                }
             }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"[AICarDriver] Ошибка при загрузке профиля бота '{botName}' из БД: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
     private void InitializeSpline()
     {
-        if (waypointContainer != null && waypointContainer.waypoints != null && waypointContainer.waypoints.Length > 2)
+        try
         {
-            spline = new CatmullRomSpline(waypointContainer.waypoints);
-        }
-        else if (waypointContainer != null)
-        {
-            // Если массив в WaypointContainer еще не заполнился в Awake,
-            // попробуем собрать дочерние объекты напрямую
-            int count = waypointContainer.transform.childCount;
-            Transform[] wps = new Transform[count];
-            for (int i = 0; i < count; i++)
+            if (waypointContainer == null)
             {
-                wps[i] = waypointContainer.transform.GetChild(i);
+                waypointContainer = FindAnyObjectByType<WaypointContainer>();
             }
-            if (count > 2)
-            {
-                spline = new CatmullRomSpline(wps);
-            }
-        }
 
-        if (spline == null)
+            if (waypointContainer != null && waypointContainer.waypoints != null && waypointContainer.waypoints.Length > 2)
+            {
+                spline = new CatmullRomSpline(waypointContainer.waypoints);
+            }
+            else if (waypointContainer != null)
+            {
+                // Если массив в WaypointContainer еще не заполнился в Awake,
+                // попробуем собрать дочерние объекты напрямую
+                int count = waypointContainer.transform.childCount;
+                Transform[] wps = new Transform[count];
+                for (int i = 0; i < count; i++)
+                {
+                    wps[i] = waypointContainer.transform.GetChild(i);
+                }
+                if (count > 2)
+                {
+                    spline = new CatmullRomSpline(wps);
+                }
+            }
+
+            if (spline == null)
+            {
+                Debug.LogError($"[AICarDriver] Не удалось инициализировать сплайн для {gameObject.name}. Проверьте вейпоинты!");
+            }
+        }
+        catch (System.Exception ex)
         {
-            Debug.LogError($"[AICarDriver] Не удалось инициализировать сплайн для {gameObject.name}. Проверьте вейпоинты!");
+            Debug.LogError($"[AICarDriver] Исключение при инициализации сплайна для {gameObject.name}: {ex.Message}\n{ex.StackTrace}");
         }
     }
 
     void FixedUpdate()
     {
+        // Если гонка еще не началась, ИИ не должен ехать или думать, что застрял
+        if (RaceManager.Instance != null && !RaceManager.Instance.isRaceStarted)
+        {
+            stuckTimer = 0f;
+            isStuck = false;
+            lastThrottle = 0f;
+            if (car != null)
+            {
+                car.SetAcceleration(0f);
+                car.SetBrake(1.0f); // Удерживаем ручник на старте
+                car.SetSteer(0f);
+            }
+            return;
+        }
+
+        // Если гонка завершена, ИИ останавливается
+        if (RaceManager.Instance != null && RaceManager.Instance.isRaceFinished)
+        {
+            if (car != null)
+            {
+                car.SetAcceleration(0f);
+                car.SetBrake(1.0f);
+                car.SetSteer(0f);
+            }
+            return;
+        }
+
         if (spline == null) return;
 
         // 1. Текущая скорость бота в км/ч + применение прижимной силы
@@ -359,7 +413,7 @@ public class AICarDriver : MonoBehaviour
             // Если колеса сильно повернуты (рулим > 0.15), принудительно урезаем газ.
             // Это решает проблему резкого ускорения бота внутри шпильки до того, как он закончил маневр.
             float steerFactor = Mathf.Abs(steerInput);
-            if (steerFactor > 0.15f)
+            if (steerFactor > 0.15f && currentSpeedKmh > 5f)
             {
                 // На максимальном вывороте руля (1.0) газ урезается до 30%, на прямых - 100%
                 throttleInput *= Mathf.Lerp(1.0f, 0.3f, (steerFactor - 0.15f) / 0.85f);
@@ -401,10 +455,28 @@ public class AICarDriver : MonoBehaviour
         // 9. ПЕРЕДАЧА УПРАВЛЕНИЯ В КОНТРОЛЛЕР
         if (car != null)
         {
+            // Обеспечиваем автоматический режим и правильную передачу (Drive) при движении вперед
+            car.transmissionMode = EzerealCarController.TransmissionModes.Automatic;
+            if (!isStuck && car.currentGear != AutomaticGears.Drive)
+            {
+                car.currentGear = AutomaticGears.Drive;
+            }
+
             car.SetSteer(steerInput);
             car.SetAcceleration(throttleInput);
             car.SetBrake(brakeInput);
             car.SetHandbrake(0f);
+        }
+
+        // Вывод отладочной информации раз в 2 секунды
+        debugPrintTimer += Time.fixedDeltaTime;
+        if (debugPrintTimer > 2.0f)
+        {
+            debugPrintTimer = 0f;
+            if (car != null)
+            {
+                Debug.Log($"[AICarDriver-Debug] Бот: {botName}, isStarted: {car.isStarted}, gear: {car.currentGear}, speed: {currentSpeedKmh:F1} km/h, targetSpeed: {targetSpeedKmh:F1} km/h, throttle: {throttleInput:F2}, brake: {brakeInput:F2}, isStuck: {isStuck}, stuckTimer: {stuckTimer:F2}, splineNull: {spline == null}");
+            }
         }
     }
 

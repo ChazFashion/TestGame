@@ -26,6 +26,19 @@ namespace RacingUI
         [Header("Settings")]
         public float animationSpeed = 5f;
 
+        private float targetHp;
+        private float targetSpeed;
+        private float targetMass;
+        private bool hasTargetStats = false;
+
+        public void UpdateStats(float hp, float speed, float mass)
+        {
+            targetHp = hp;
+            targetSpeed = speed;
+            targetMass = mass;
+            hasTargetStats = true;
+        }
+
         private void OnEnable()
         {
             // Обнуляем полоски при каждом открытии гаража для эффекта анимации
@@ -36,16 +49,23 @@ namespace RacingUI
 
         private void Update()
         {
-            if (currentCar == null) return;
-
-            // Плавно подтягиваем значения из скрипта машины к слайдерам
-            AnimateStat(hpStat, currentCar.horsePower);
-            AnimateStat(speedStat, currentCar.maxForwardSpeed);
-            
-            // Вес берем из Rigidbody машины
-            if (currentCar.vehicleRB != null)
+            if (hasTargetStats)
             {
-                AnimateStat(weightStat, currentCar.vehicleRB.mass);
+                AnimateStat(hpStat, targetHp);
+                AnimateStat(speedStat, targetSpeed);
+                AnimateStat(weightStat, targetMass);
+            }
+            else if (currentCar != null)
+            {
+                // Плавно подтягиваем значения из скрипта машины к слайдерам
+                AnimateStat(hpStat, currentCar.horsePower);
+                AnimateStat(speedStat, currentCar.maxForwardSpeed);
+                
+                // Вес берем из Rigidbody машины
+                if (currentCar.vehicleRB != null)
+                {
+                    AnimateStat(weightStat, currentCar.vehicleRB.mass);
+                }
             }
         }
 
