@@ -68,9 +68,464 @@ namespace RacingUI
 
         private List<ParticipantState> participants = new List<ParticipantState>();
 
+        [Header("Dynamic Spawning")]
+        [Tooltip("Точка спавна игрока (если не задана машина на сцене)")]
+        public Transform playerSpawnPoint;
+        [Tooltip("Точка спавна бота (если не задана машина на сцене)")]
+        public Transform aiSpawnPoint;
+        [Tooltip("Префаб по умолчанию для игрока")]
+        public GameObject defaultPlayerCarPrefab;
+        [Tooltip("Имя бота-соперника для спавна")]
+        public string opponentBotName = "Бот Сергей";
+
         private void Awake()
         {
             if (Instance == null) Instance = this;
+            SpawnCars();
+        }
+
+        private void SpawnCars()
+        {
+            if (DataManager.Instance == null)
+            {
+                Debug.LogWarning("[RaceManager] DataManager.Instance не найден! Пропускаем динамический спавн.");
+                return;
+            }
+
+            // --- 1. СПАВН ИГРОКА ---
+            Vector3 playerPos = Vector3.zero;
+            Quaternion playerRot = Quaternion.identity;
+            bool hasPlayerSpawn = false;
+
+            // Если машина игрока уже перетащена в инспекторе, используем её координаты и уничтожаем
+            if (playerCar != null)
+            {
+                playerPos = playerCar.transform.position;
+                playerRot = playerCar.transform.rotation;
+                hasPlayerSpawn = true;
+                DestroyImmediate(playerCar.gameObject);
+                playerCar = null;
+            }
+            else if (playerSpawnPoint != null)
+            {
+                playerPos = playerSpawnPoint.position;
+                playerRot = playerSpawnPoint.rotation;
+                hasPlayerSpawn = true;
+            }
+
+            if (hasPlayerSpawn)
+            {
+                int activeCarId = DataManager.Instance.GetActiveCarId();
+                var carData = DataManager.Instance.GetCarGarageState(activeCarId);
+                
+                if (carData != null && carData.ContainsKey("prefab_name"))
+                {
+                    string prefabName = carData["prefab_name"].ToString();
+                    var mapping = DataManager.Instance.carPrefabs.Find(m => m.prefabName == prefabName);
+                    
+                    GameObject prefabToSpawn = mapping.gameplayPrefab;
+                    if (prefabToSpawn == null && defaultPlayerCarPrefab != null)
+                    {
+                        prefabToSpawn = defaultPlayerCarPrefab;
+                    }
+
+                    if (prefabToSpawn != null)
+                    {
+                        playerPos.y += 0.25f; // Приподнимаем над землей, чтобы исключить застревание
+                        GameObject spawned = Instantiate(prefabToSpawn, playerPos, playerRot);
+                        spawned.name = "PlayerCar_" + prefabName;
+                        playerCar = spawned.GetComponent<EzerealCarController>();
+                        if (playerCar == null) playerCar = spawned.GetComponentInChildren<EzerealCarController>();
+
+                        // Если используем стандартную машину-заполнитель, подменяем её 3D-модель на нужную из БД
+                        if (prefabToSpawn == defaultPlayerCarPrefab && mapping.menuShowcasePrefab != null)
+                        {
+                            SwapVisualModel(playerCar, mapping.menuShowcasePrefab);
+                        }
+
+                        Debug.Log($"[RaceManager] Успешно заспавнена машина игрока: {spawned.name}");
+                        ApplyUpgradesToCar(playerCar, activeCarId);
+
+
+
+                        // Находим камеру на сцене со скриптом SmoothCameraFollow и привязываем её к игроку
+                        SmoothCameraFollow followCam = FindAnyObjectByType<SmoothCameraFollow>();
+                        if (followCam != null)
+                        {
+                            if (playerCar != null)
+                            {
+                                followCam.target = playerCar.vehicleRB != null ? playerCar.vehicleRB.transform : playerCar.transform;
+                            }
+                            else
+                            {
+                                Debug.LogError("[RaceManager] Не удалось установить камеру: компонент EzerealCarController не найден на заспавненной машине игрока!");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError($"[RaceManager] Не найден геймплейный префаб для {prefabName}!");
+                    }
+                }
+            }
+
+            // --- 2. СПАВН БОТА ---
+            Vector3 aiPos = Vector3.zero;
+            Quaternion aiRot = Quaternion.identity;
+            bool hasAiSpawn = false;
+
+            if (aiCar != null)
+            {
+                aiPos = aiCar.transform.position;
+                aiRot = aiCar.transform.rotation;
+                hasAiSpawn = true;
+
+                var oldDriver = aiCar.GetComponentInChildren<AICarDriver>();
+                if (oldDriver != null)
+                {
+                    opponentBotName = oldDriver.botName;
+                }
+
+                DestroyImmediate(aiCar.gameObject);
+                aiCar = null;
+            }
+            else if (aiSpawnPoint != null)
+            {
+                aiPos = aiSpawnPoint.position;
+                aiRot = aiSpawnPoint.rotation;
+                hasAiSpawn = true;
+            }
+
+            if (hasAiSpawn)
+            {
+                string botName = opponentBotName;
+                if (DataManager.Instance != null)
+                {
+                    botName = DataManager.Instance.selectedOpponentBotName;
+                }
+
+                var botProfile = DataManager.Instance.GetBotProfileByName(botName);
+                if (botProfile != null && botProfile.ContainsKey("prefab"))
+                {
+                    string botPrefabName = botProfile["prefab"].ToString();
+                    var mapping = DataManager.Instance.carPrefabs.Find(m => m.prefabName == botPrefabName);
+                    
+                    GameObject botPrefab = mapping.gameplayPrefab;
+                    if (botPrefab == null && defaultPlayerCarPrefab != null)
+                    {
+                        botPrefab = defaultPlayerCarPrefab;
+                    }
+
+                    if (botPrefab != null)
+                    {
+                        aiPos.y += 0.25f; // Приподнимаем над землей, чтобы исключить застревание
+                        GameObject spawned = Instantiate(botPrefab, aiPos, aiRot);
+                        spawned.name = "AICar_" + botName;
+                        aiCar = spawned.GetComponent<EzerealCarController>();
+                        if (aiCar == null) aiCar = spawned.GetComponentInChildren<EzerealCarController>();
+
+                        // Подменяем 3D-модель для ИИ
+                        if (botPrefab == defaultPlayerCarPrefab && mapping.menuShowcasePrefab != null)
+                        {
+                            SwapVisualModel(aiCar, mapping.menuShowcasePrefab);
+                        }
+
+                        var aiDriver = spawned.GetComponentInChildren<AICarDriver>();
+                        if (aiDriver == null)
+                        {
+                            // Добавляем ИИ-водителя на тот же объект, где висит Rigidbody (чтобы transform двигался)
+                            Rigidbody aiRb = spawned.GetComponentInChildren<Rigidbody>();
+                            if (aiRb != null)
+                            {
+                                aiDriver = aiRb.gameObject.AddComponent<AICarDriver>();
+                            }
+                            else
+                            {
+                                aiDriver = spawned.AddComponent<AICarDriver>();
+                            }
+                        }
+
+                        if (aiDriver != null)
+                        {
+                            aiDriver.botName = botName;
+
+                            // Назначаем контейнер вейпоинтов для бота
+                            if (aiWaypointsContainer == null)
+                            {
+                                GameObject wpObj = GameObject.Find("Waypoints");
+                                if (wpObj != null)
+                                {
+                                    aiWaypointsContainer = wpObj.transform;
+                                }
+                            }
+
+                            if (aiWaypointsContainer != null)
+                            {
+                                var wpContainer = aiWaypointsContainer.GetComponent<WaypointContainer>();
+                                if (wpContainer == null)
+                                {
+                                    wpContainer = aiWaypointsContainer.gameObject.AddComponent<WaypointContainer>();
+                                    int count = aiWaypointsContainer.childCount;
+                                    wpContainer.waypoints = new Transform[count];
+                                    for (int i = 0; i < count; i++)
+                                    {
+                                        wpContainer.waypoints[i] = aiWaypointsContainer.GetChild(i);
+                                    }
+                                }
+                                aiDriver.waypointContainer = wpContainer;
+                            }
+                            
+                            // Отключаем PlayerInput у машины бота
+                            var playerInput = spawned.GetComponent<UnityEngine.InputSystem.PlayerInput>();
+                            if (playerInput == null) playerInput = spawned.GetComponentInChildren<UnityEngine.InputSystem.PlayerInput>();
+                            if (playerInput != null) playerInput.enabled = false;
+                        }
+
+                        // Настраиваем базовые характеристики бота
+                        if (botProfile != null && botProfile.ContainsKey("car_id"))
+                        {
+                            int botCarId = System.Convert.ToInt32(botProfile["car_id"]);
+                            ConfigureAiCarStats(aiCar, botCarId);
+                        }
+
+                        Debug.Log($"[RaceManager] Успешно заспавнена машина бота: {spawned.name}");
+                    }
+                    else
+                    {
+                        Debug.LogError($"[RaceManager] Не найден геймплейный префаб бота для: {botPrefabName}");
+                    }
+                }
+            }
+        }
+
+        private void ApplyUpgradesToCar(EzerealCarController car, int carId)
+        {
+            if (car == null) return;
+            if (DataManager.Instance == null) return;
+
+            var levels = DataManager.Instance.GetCarUpgradeLevels(carId);
+            int engine = levels["engine"];
+            int handling = levels["handling"];
+
+            // 1. Считываем базовые характеристики в зависимости от модели
+            float baseHp = 100f;
+            float baseSpeed = 120f;
+            float baseMass = 1200f;
+
+            var carData = DataManager.Instance.GetCarGarageState(carId);
+            if (carData != null)
+            {
+                if (carData.ContainsKey("base_hp")) baseHp = System.Convert.ToSingle(carData["base_hp"]);
+                if (carData.ContainsKey("base_speed")) baseSpeed = System.Convert.ToSingle(carData["base_speed"]);
+                if (carData.ContainsKey("base_weight")) baseMass = System.Convert.ToSingle(carData["base_weight"]);
+
+                if (carData.ContainsKey("prefab_name"))
+                {
+                    string prefabName = carData["prefab_name"].ToString();
+                    var mapping = DataManager.Instance.carPrefabs.Find(m => m.prefabName == prefabName);
+
+                    // Переопределяем параметры из инспектора, если они заданы пользователем
+                    if (mapping.baseHorsePower > 0f) baseHp = mapping.baseHorsePower;
+                    if (mapping.baseMaxSpeed > 0f) baseSpeed = mapping.baseMaxSpeed;
+                    if (mapping.baseMass > 0f) baseMass = mapping.baseMass;
+                }
+            }
+
+            // Устанавливаем базовые параметры на контроллер
+            car.horsePower = baseHp;
+            car.maxForwardSpeed = baseSpeed;
+
+            Rigidbody rb = car.vehicleRB;
+            if (rb == null) rb = car.GetComponent<Rigidbody>();
+            if (rb == null) rb = car.GetComponentInChildren<Rigidbody>();
+            if (rb != null)
+            {
+                rb.mass = baseMass;
+            }
+
+            // 2. Двигатель (Прокачка)
+            float engineMultiplier = 1f + (engine - 1) * 0.15f;
+            car.horsePower = car.horsePower * engineMultiplier;
+            car.maxForwardSpeed = car.maxForwardSpeed * (1f + (engine - 1) * 0.08f);
+
+            // 3. Управляемость (Облегчение массы)
+            if (rb != null)
+            {
+                float massMultiplier = 1f - (handling - 1) * 0.05f;
+                rb.mass = rb.mass * massMultiplier;
+            }
+
+            Debug.Log($"[RaceManager] Настроены параметры авто ID={carId}: БазоваяМощность={baseHp:F1} HP, ИтоговаяМощность={car.horsePower:F1} HP, Масса={rb?.mass:F1} кг");
+        }
+
+        private void ConfigureAiCarStats(EzerealCarController car, int carId)
+        {
+            if (car == null || DataManager.Instance == null) return;
+
+            // Считываем базовые характеристики в зависимости от модели
+            float baseHp = 100f;
+            float baseSpeed = 120f;
+            float baseMass = 1200f;
+
+            var carData = DataManager.Instance.GetCarGarageState(carId);
+            if (carData != null)
+            {
+                if (carData.ContainsKey("base_hp")) baseHp = System.Convert.ToSingle(carData["base_hp"]);
+                if (carData.ContainsKey("base_speed")) baseSpeed = System.Convert.ToSingle(carData["base_speed"]);
+                if (carData.ContainsKey("base_weight")) baseMass = System.Convert.ToSingle(carData["base_weight"]);
+
+                if (carData.ContainsKey("prefab_name"))
+                {
+                    string prefabName = carData["prefab_name"].ToString();
+                    var mapping = DataManager.Instance.carPrefabs.Find(m => m.prefabName == prefabName);
+
+                    // Переопределяем параметры из инспектора, если они заданы пользователем
+                    if (mapping.baseHorsePower > 0f) baseHp = mapping.baseHorsePower;
+                    if (mapping.baseMaxSpeed > 0f) baseSpeed = mapping.baseMaxSpeed;
+                    if (mapping.baseMass > 0f) baseMass = mapping.baseMass;
+                }
+            }
+
+            // Устанавливаем базовые параметры на контроллер бота
+            car.horsePower = baseHp;
+            car.maxForwardSpeed = baseSpeed;
+
+            Rigidbody rb = car.vehicleRB;
+            if (rb == null) rb = car.GetComponent<Rigidbody>();
+            if (rb == null) rb = car.GetComponentInChildren<Rigidbody>();
+            if (rb != null)
+            {
+                rb.mass = baseMass;
+            }
+
+            Debug.Log($"[RaceManager] Инициализированы базовые параметры бота ID={carId}: HP={baseHp:F1}, MaxSpeed={baseSpeed:F1}, Mass={rb?.mass:F1}");
+        }
+
+        private void SwapVisualModel(EzerealCarController car, GameObject visualPrefab)
+        {
+            if (car == null || visualPrefab == null) return;
+
+            // 1. Скрываем все оригинальные MeshRenderer и SkinnedMeshRenderer (визуал грузовика) на всей машине (от корня)
+            MeshRenderer[] originalMeshRenderers = car.transform.root.GetComponentsInChildren<MeshRenderer>(true);
+            foreach (var renderer in originalMeshRenderers)
+            {
+                renderer.enabled = false;
+            }
+            SkinnedMeshRenderer[] originalSkinnedRenderers = car.transform.root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            foreach (var renderer in originalSkinnedRenderers)
+            {
+                renderer.enabled = false;
+            }
+
+            // Отключаем внутренние приборные панели (Canvas) грузовика, чтобы убрать наложение передач, но сохраняем Overlay Canvas для игрока
+            Canvas[] originalCanvases = car.transform.root.GetComponentsInChildren<Canvas>(true);
+            foreach (var canvas in originalCanvases)
+            {
+                if (canvas.gameObject.name == "Overlay Canvas")
+                {
+                    canvas.gameObject.SetActive(car == playerCar);
+                }
+                else
+                {
+                    canvas.enabled = false;
+                }
+            }
+
+            // 2. Создаем визуальную модель советской машины как дочерний объект для КОРНЯ машины
+            GameObject visualInstance = Instantiate(visualPrefab, car.transform.root);
+            visualInstance.transform.localPosition = Vector3.zero;
+            visualInstance.transform.localRotation = Quaternion.identity;
+            visualInstance.transform.localScale = Vector3.one;
+
+            // Выключаем Static у новой модели и всех её дочерних объектов, чтобы она двигалась
+            visualInstance.isStatic = false;
+            foreach (Transform t in visualInstance.GetComponentsInChildren<Transform>(true))
+            {
+                t.gameObject.isStatic = false;
+            }
+
+            // 3. Удаляем физику и коллайдеры с новой визуальной модели
+            Rigidbody visualRb = visualInstance.GetComponent<Rigidbody>();
+            if (visualRb == null) visualRb = visualInstance.GetComponentInChildren<Rigidbody>();
+            if (visualRb != null) Destroy(visualRb);
+
+            Collider[] visualColliders = visualInstance.GetComponentsInChildren<Collider>(true);
+            foreach (var col in visualColliders)
+            {
+                Destroy(col);
+            }
+
+            // 4. Поиск колес в новой визуальной модели по именам (Lada/Volga)
+            Transform flWheel = null;
+            Transform frWheel = null;
+            Transform rlWheel = null;
+            Transform rrWheel = null;
+
+            Transform[] children = visualInstance.GetComponentsInChildren<Transform>(true);
+            foreach (var child in children)
+            {
+                string name = child.name.ToLower();
+                if (name.Contains("wheel") || name.Contains("whl") || name.Contains("koleso"))
+                {
+                    if (name.Contains("f_l") || (name.Contains("front") && name.Contains("left")) || name.Contains("_fl"))
+                    {
+                        flWheel = child;
+                    }
+                    else if (name.Contains("f_r") || (name.Contains("front") && name.Contains("right")) || name.Contains("_fr"))
+                    {
+                        frWheel = child;
+                    }
+                    else if (name.Contains("r_l") || (name.Contains("rear") && name.Contains("left")) || name.Contains("back_l") || name.Contains("_rl"))
+                    {
+                        rlWheel = child;
+                    }
+                    else if (name.Contains("r_r") || (name.Contains("rear") && name.Contains("right")) || name.Contains("back_r") || name.Contains("_rr"))
+                    {
+                        rrWheel = child;
+                    }
+                }
+            }
+
+            // 5. Переназначаем колесные меши в EzerealCarController через Рефлексию и сдвигаем WheelColliders в мировом пространстве
+            var controllerType = typeof(EzerealCarController);
+            if (flWheel != null)
+            {
+                controllerType.GetField("frontLeftWheelMesh", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(car, flWheel);
+                if (car.frontLeftWheelCollider != null)
+                {
+                    Vector3 targetPos = new Vector3(flWheel.position.x, car.frontLeftWheelCollider.transform.position.y, flWheel.position.z);
+                    car.frontLeftWheelCollider.transform.position = targetPos;
+                }
+            }
+            if (frWheel != null)
+            {
+                controllerType.GetField("frontRightWheelMesh", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(car, frWheel);
+                if (car.frontRightWheelCollider != null)
+                {
+                    Vector3 targetPos = new Vector3(frWheel.position.x, car.frontRightWheelCollider.transform.position.y, frWheel.position.z);
+                    car.frontRightWheelCollider.transform.position = targetPos;
+                }
+            }
+            if (rlWheel != null)
+            {
+                controllerType.GetField("rearLeftWheelMesh", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(car, rlWheel);
+                if (car.rearLeftWheelCollider != null)
+                {
+                    Vector3 targetPos = new Vector3(rlWheel.position.x, car.rearLeftWheelCollider.transform.position.y, rlWheel.position.z);
+                    car.rearLeftWheelCollider.transform.position = targetPos;
+                }
+            }
+            if (rrWheel != null)
+            {
+                controllerType.GetField("rearRightWheelMesh", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.SetValue(car, rrWheel);
+                if (car.rearRightWheelCollider != null)
+                {
+                    Vector3 targetPos = new Vector3(rrWheel.position.x, car.rearRightWheelCollider.transform.position.y, rrWheel.position.z);
+                    car.rearRightWheelCollider.transform.position = targetPos;
+                }
+            }
+
+            Debug.Log($"[RaceManager] Визуал {visualPrefab.name} успешно интегрирован в EzerealCarController!");
         }
 
         private void Start()
@@ -106,6 +561,13 @@ namespace RacingUI
 
         private void LoadTrackDataFromDatabase()
         {
+            if (DataManager.Instance != null)
+            {
+                totalLaps = DataManager.Instance.selectedLapsCount;
+                Debug.Log($"[RaceManager] Количество кругов установлено из настроек: {totalLaps}");
+                return;
+            }
+
             DataManager dm = FindAnyObjectByType<DataManager>();
             if (dm != null)
             {
@@ -615,6 +1077,7 @@ namespace RacingUI
                 {
                     if (script != aiCar && script.gameObject.activeInHierarchy)
                     {
+                        if (script.GetType().Name == "PlayerInput") continue;
                         script.enabled = !freeze;
                     }
                 }

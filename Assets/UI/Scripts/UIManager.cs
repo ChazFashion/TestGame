@@ -54,7 +54,13 @@ namespace RacingUI
             // 2. Переключаем экраны
             switch (index)
             {
-                case 0: SwitchScreen(garageScreen, true); break;
+                case 0: 
+                    SwitchScreen(garageScreen, true); 
+                    if (GarageManager.Instance != null)
+                    {
+                        GarageManager.Instance.RefreshGarageData();
+                    }
+                    break;
                 case 1: 
                     SwitchScreen(raceSelectScreen, true); 
                     // Задержка перед выделением кнопки, чтобы избежать ложных нажатий

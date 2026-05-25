@@ -114,6 +114,12 @@ namespace Ezereal
 
         private void Awake()
         {
+            // Fallback for null wheel colliders
+            if (frontLeftWheelCollider == null) frontLeftWheelCollider = FindWheelColliderInParentOrChildren("front", "left");
+            if (frontRightWheelCollider == null) frontRightWheelCollider = FindWheelColliderInParentOrChildren("front", "right");
+            if (rearLeftWheelCollider == null) rearLeftWheelCollider = FindWheelColliderInParentOrChildren("rear", "left");
+            if (rearRightWheelCollider == null) rearRightWheelCollider = FindWheelColliderInParentOrChildren("rear", "right");
+
             wheels = new WheelCollider[]
             {
                 frontLeftWheelCollider,
@@ -359,29 +365,29 @@ namespace Ezereal
         {
             if (driveType == DriveTypes.RWD)
             {
-                rearLeftWheelCollider.motorTorque = torque;
-                rearRightWheelCollider.motorTorque = torque;
+                if (rearLeftWheelCollider != null) rearLeftWheelCollider.motorTorque = torque;
+                if (rearRightWheelCollider != null) rearRightWheelCollider.motorTorque = torque;
             }
             else if (driveType == DriveTypes.FWD)
             {
-                frontLeftWheelCollider.motorTorque = torque;
-                frontRightWheelCollider.motorTorque = torque;
+                if (frontLeftWheelCollider != null) frontLeftWheelCollider.motorTorque = torque;
+                if (frontRightWheelCollider != null) frontRightWheelCollider.motorTorque = torque;
             }
             else if (driveType == DriveTypes.AWD)
             {
-                frontLeftWheelCollider.motorTorque = torque;
-                frontRightWheelCollider.motorTorque = torque;
-                rearLeftWheelCollider.motorTorque = torque;
-                rearRightWheelCollider.motorTorque = torque;
+                if (frontLeftWheelCollider != null) frontLeftWheelCollider.motorTorque = torque;
+                if (frontRightWheelCollider != null) frontRightWheelCollider.motorTorque = torque;
+                if (rearLeftWheelCollider != null) rearLeftWheelCollider.motorTorque = torque;
+                if (rearRightWheelCollider != null) rearRightWheelCollider.motorTorque = torque;
             }
         }
 
         private void ClearWheelTorque()
         {
-            frontLeftWheelCollider.motorTorque = 0;
-            frontRightWheelCollider.motorTorque = 0;
-            rearLeftWheelCollider.motorTorque = 0;
-            rearRightWheelCollider.motorTorque = 0;
+            if (frontLeftWheelCollider != null) frontLeftWheelCollider.motorTorque = 0;
+            if (frontRightWheelCollider != null) frontRightWheelCollider.motorTorque = 0;
+            if (rearLeftWheelCollider != null) rearLeftWheelCollider.motorTorque = 0;
+            if (rearRightWheelCollider != null) rearRightWheelCollider.motorTorque = 0;
         }
 
         private float GetManualGearMaxSpeed(int gear)
@@ -424,13 +430,13 @@ namespace Ezereal
         {
             if (currentBrakeValue > 0f)
             {
-                frontLeftWheelCollider.brakeTorque = currentBrakeValue * brakePower;
-                frontRightWheelCollider.brakeTorque = currentBrakeValue * brakePower;
+                if (frontLeftWheelCollider != null) frontLeftWheelCollider.brakeTorque = currentBrakeValue * brakePower;
+                if (frontRightWheelCollider != null) frontRightWheelCollider.brakeTorque = currentBrakeValue * brakePower;
             }
             else
             {
-                frontLeftWheelCollider.brakeTorque = 0;
-                frontRightWheelCollider.brakeTorque = 0;
+                if (frontLeftWheelCollider != null) frontLeftWheelCollider.brakeTorque = 0;
+                if (frontRightWheelCollider != null) frontRightWheelCollider.brakeTorque = 0;
             }
         }
 
@@ -438,15 +444,15 @@ namespace Ezereal
         {
             if (currentHandbrakeValue > 0f)
             {
-                rearLeftWheelCollider.motorTorque = 0;
-                rearRightWheelCollider.motorTorque = 0;
-                rearLeftWheelCollider.brakeTorque = currentHandbrakeValue * handbrakeForce;
-                rearRightWheelCollider.brakeTorque = currentHandbrakeValue * handbrakeForce;
+                if (rearLeftWheelCollider != null) rearLeftWheelCollider.motorTorque = 0;
+                if (rearRightWheelCollider != null) rearRightWheelCollider.motorTorque = 0;
+                if (rearLeftWheelCollider != null) rearLeftWheelCollider.brakeTorque = currentHandbrakeValue * handbrakeForce;
+                if (rearRightWheelCollider != null) rearRightWheelCollider.brakeTorque = currentHandbrakeValue * handbrakeForce;
             }
             else
             {
-                rearLeftWheelCollider.brakeTorque = 0;
-                rearRightWheelCollider.brakeTorque = 0;
+                if (rearLeftWheelCollider != null) rearLeftWheelCollider.brakeTorque = 0;
+                if (rearRightWheelCollider != null) rearRightWheelCollider.brakeTorque = 0;
             }
         }
 
@@ -456,8 +462,8 @@ namespace Ezereal
             float adjustedTurnAngle = targetSteerAngle * (1 - adjustedspeedFactor); //based on current speed.
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, adjustedTurnAngle, Time.deltaTime * steeringSpeed);
 
-            frontLeftWheelCollider.steerAngle = currentSteerAngle;
-            frontRightWheelCollider.steerAngle = currentSteerAngle;
+            if (frontLeftWheelCollider != null) frontLeftWheelCollider.steerAngle = currentSteerAngle;
+            if (frontRightWheelCollider != null) frontRightWheelCollider.steerAngle = currentSteerAngle;
 
             UpdateWheel(frontLeftWheelCollider, frontLeftWheelMesh);
             UpdateWheel(frontRightWheelCollider, frontRightWheelMesh);
@@ -575,10 +581,15 @@ namespace Ezereal
             Slowdown();
             RotateSteeringWheel();
 
-            if (Mathf.Abs(frontLeftWheelCollider.rpm) < stopThreshold &&
-                Mathf.Abs(frontRightWheelCollider.rpm) < stopThreshold &&
-                Mathf.Abs(rearLeftWheelCollider.rpm) < stopThreshold &&
-                Mathf.Abs(rearRightWheelCollider.rpm) < stopThreshold)
+            float flRPM = frontLeftWheelCollider != null ? frontLeftWheelCollider.rpm : 0f;
+            float frRPM = frontRightWheelCollider != null ? frontRightWheelCollider.rpm : 0f;
+            float rlRPM = rearLeftWheelCollider != null ? rearLeftWheelCollider.rpm : 0f;
+            float rrRPM = rearRightWheelCollider != null ? rearRightWheelCollider.rpm : 0f;
+
+            if (Mathf.Abs(flRPM) < stopThreshold &&
+                Mathf.Abs(frRPM) < stopThreshold &&
+                Mathf.Abs(rlRPM) < stopThreshold &&
+                Mathf.Abs(rrRPM) < stopThreshold)
             {
                 stationary = true;
             }
@@ -593,17 +604,25 @@ namespace Ezereal
                 currentSpeed = Vector3.Dot(vehicleRB.gameObject.transform.forward, vehicleRB.linearVelocity);
                 currentSpeed *= 3.6f;
                 UpdateSpeedText(currentSpeed);
+                
+                // Добавляем прижимную силу (Downforce) для лучшего сцепления
+                Vector3 downforce = -transform.up * 35f * vehicleRB.linearVelocity.magnitude;
+                vehicleRB.AddForce(downforce);
 #else
                 currentSpeed = Vector3.Dot(vehicleRB.gameObject.transform.forward, vehicleRB.velocity);
                 currentSpeed *= 3.6f;
                 UpdateSpeedText(currentSpeed);
+                
+                // Добавляем прижимную силу (Downforce) для лучшего сцепления
+                Vector3 downforce = -transform.up * 35f * vehicleRB.velocity.magnitude;
+                vehicleRB.AddForce(downforce);
 #endif
             }
 
-            FrontLeftWheelRPM = frontLeftWheelCollider.rpm;
-            FrontRightWheelRPM = frontRightWheelCollider.rpm;
-            RearLeftWheelRPM = rearLeftWheelCollider.rpm;
-            RearRightWheelRPM = rearRightWheelCollider.rpm;
+            FrontLeftWheelRPM = frontLeftWheelCollider != null ? frontLeftWheelCollider.rpm : 0f;
+            FrontRightWheelRPM = frontRightWheelCollider != null ? frontRightWheelCollider.rpm : 0f;
+            RearLeftWheelRPM = rearLeftWheelCollider != null ? rearLeftWheelCollider.rpm : 0f;
+            RearRightWheelRPM = rearRightWheelCollider != null ? rearRightWheelCollider.rpm : 0f;
 
             CalculateEngineRPM();
         }
@@ -743,15 +762,21 @@ namespace Ezereal
 
         private void UpdateWheel(WheelCollider col, Transform mesh)
         {
+            if (col == null || mesh == null) return;
             col.GetWorldPose(out Vector3 position, out Quaternion rotation);
             mesh.SetPositionAndRotation(position, rotation);
         }
 
         void RotateSteeringWheel()
         {
+            if (steeringWheel == null) return;
             float currentXAngle = steeringWheel.transform.localEulerAngles.x; // Maximum steer angle in degrees
 
-            float normalizedSteerAngle = Mathf.Clamp(frontLeftWheelCollider.steerAngle, -maxSteerAngle, maxSteerAngle);
+            float normalizedSteerAngle = 0f;
+            if (frontLeftWheelCollider != null)
+            {
+                normalizedSteerAngle = Mathf.Clamp(frontLeftWheelCollider.steerAngle, -maxSteerAngle, maxSteerAngle);
+            }
             float rotation = Mathf.Lerp(maxSteeringWheelRotation, -maxSteeringWheelRotation, (normalizedSteerAngle + maxSteerAngle) / (2 * maxSteerAngle));
 
             steeringWheel.localRotation = Quaternion.Euler(currentXAngle, 0, rotation);
@@ -804,14 +829,38 @@ namespace Ezereal
 
         public bool InAir()
         {
+            if (wheels == null) return true;
             foreach (WheelCollider wheel in wheels)
             {
-                if (wheel.GetGroundHit(out _))
+                if (wheel != null && wheel.GetGroundHit(out _))
                 {
                     return false;
                 }
             }
             return true;
+        }
+
+        private WheelCollider FindWheelColliderInParentOrChildren(string part1, string part2)
+        {
+            // First search in children
+            foreach (var col in GetComponentsInChildren<WheelCollider>(true))
+            {
+                string name = col.gameObject.name.ToLower();
+                if (name.Contains(part1) && name.Contains(part2))
+                {
+                    return col;
+                }
+            }
+            // If not found in children, search in the parent hierarchy
+            foreach (var col in transform.root.GetComponentsInChildren<WheelCollider>(true))
+            {
+                string name = col.gameObject.name.ToLower();
+                if (name.Contains(part1) && name.Contains(part2))
+                {
+                    return col;
+                }
+            }
+            return null;
         }
     }
 }

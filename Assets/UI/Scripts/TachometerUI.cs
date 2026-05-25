@@ -37,7 +37,14 @@ namespace RacingUI
             // Если ссылка не перетащена в инспекторе, попробуем найти на сцене
             if (carController == null)
             {
-                carController = FindAnyObjectByType<EzerealCarController>();
+                if (RaceManager.Instance != null && RaceManager.Instance.playerCar != null)
+                {
+                    carController = RaceManager.Instance.playerCar;
+                }
+                else
+                {
+                    carController = FindAnyObjectByType<EzerealCarController>();
+                }
             }
 
             if (needleTransform == null)
@@ -60,7 +67,15 @@ namespace RacingUI
             if (carController == null)
             {
                 // Постоянный поиск на случай, если машина спавнится динамически
-                carController = FindAnyObjectByType<EzerealCarController>();
+                if (RaceManager.Instance != null && RaceManager.Instance.playerCar != null)
+                {
+                    carController = RaceManager.Instance.playerCar;
+                }
+                else
+                {
+                    carController = FindAnyObjectByType<EzerealCarController>();
+                }
+
                 if (carController == null) return;
             }
 
