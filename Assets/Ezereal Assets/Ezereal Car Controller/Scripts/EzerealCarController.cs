@@ -48,6 +48,10 @@ namespace Ezereal
         public float decelerationSpeed = 0.5f; // 0.5f default
         public float maxSteeringWheelRotation = 360f; // 360 for real steering wheel. 120 would be more suitable for racing.
 
+        [Header("Stability Settings")]
+        [Tooltip("Смещение центра тяжести Rigidbody. Отрицательный Y опускает центр тяжести ближе к земле, делая машину устойчивой.")]
+        public Vector3 centerOfMassOffset = new Vector3(0f, -0.8f, 0.2f);
+
         [Header("Drive Type")]
         public DriveTypes driveType = DriveTypes.RWD;
 
@@ -146,6 +150,11 @@ namespace Ezereal
             if (vehicleRB == null)
             {
                 Debug.LogError("VehicleRB reference is missing for EzerealCarController!");
+            }
+            else
+            {
+                // Применяем смещение центра тяжести для устойчивости автомобиля
+                vehicleRB.centerOfMass = centerOfMassOffset;
             }
 
             if (isStarted)
@@ -780,6 +789,23 @@ namespace Ezereal
             float rotation = Mathf.Lerp(maxSteeringWheelRotation, -maxSteeringWheelRotation, (normalizedSteerAngle + maxSteerAngle) / (2 * maxSteerAngle));
 
             steeringWheel.localRotation = Quaternion.Euler(currentXAngle, 0, rotation);
+        }
+
+        public void SetUITextReferences(TMP_Text speedText, TMP_Text gearText)
+        {
+            currentSpeedTMP_UI = speedText;
+            currentGearTMP_UI = gearText;
+
+            // Сразу принудительно инициализируем текст скорости и передачи на сцене гонки
+            UpdateSpeedText(currentSpeed);
+            if (transmissionMode == TransmissionModes.Manual)
+            {
+                UpdateManualGearText();
+            }
+            else
+            {
+                UpdateGearText(currentGear);
+            }
         }
 
         void UpdateGearText(string gear)

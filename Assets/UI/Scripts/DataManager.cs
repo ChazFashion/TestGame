@@ -491,6 +491,48 @@ namespace RacingUI
             return true;
         }
 
+        // Получить гемы игрока
+        public int GetGems(int playerId = 1)
+        {
+            int gems = 0;
+            using (var connection = new SqliteConnection(connectionString))
+            {
+                connection.Open();
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT gems FROM Players WHERE id = @id;";
+                    cmd.Parameters.AddWithValue("@id", playerId);
+                    var result = cmd.ExecuteScalar();
+                    if (result != null && result != DBNull.Value)
+                    {
+                        gems = Convert.ToInt32(result);
+                    }
+                }
+            }
+            return gems;
+        }
+
+        // Изменить количество гемов (прибавить/вычесть)
+        public bool AddGems(int amount, int playerId = 1)
+        {
+            int currentGems = GetGems(playerId);
+            if (currentGems + amount < 0) return false; // Недостаточно гемов
+
+            using (var connection = new SqliteConnection(connectionString))
+            {
+                connection.Open();
+                using (var cmd = connection.CreateCommand())
+                {
+                    cmd.CommandText = "UPDATE Players SET gems = gems + @amount WHERE id = @id;";
+                    cmd.Parameters.AddWithValue("@amount", amount);
+                    cmd.Parameters.AddWithValue("@id", playerId);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+            Debug.Log($"[DataManager] Баланс гемов изменен на {amount}. Текущий: {currentGems + amount}");
+            return true;
+        }
+
         // Получить все разблокированные машины в гараже
         public List<string> GetUnlockedCarNames(int playerId = 1)
         {

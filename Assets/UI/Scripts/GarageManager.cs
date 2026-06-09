@@ -23,6 +23,7 @@ namespace RacingUI
 
         [Header("UI References")]
         [SerializeField] private TMP_Text coinsText;
+        [SerializeField] private TMP_Text gemsText;
         [SerializeField] private TMP_Text carNameText;
         [SerializeField] private TMP_Text rarityText;
         [SerializeField] private Button actionButton; // Кнопка КУПИТЬ / ВЫБРАТЬ
@@ -111,14 +112,14 @@ namespace RacingUI
             if (index < 0 || index >= carsInLibrary.Count) return;
             currentCarIndex = index;
             
-            // Автоматически разблокируем и выбираем машину в БД
             if (DataManager.Instance != null)
             {
                 int carId = System.Convert.ToInt32(carsInLibrary[currentCarIndex]["id"]);
-                DataManager.Instance.UnlockCar(carId);
-                DataManager.Instance.SetActiveCarId(carId);
-                // Обновляем список машин в памяти
-                carsInLibrary = DataManager.Instance.GetAllCarsWithStatus();
+                bool isUnlocked = System.Convert.ToBoolean(carsInLibrary[currentCarIndex]["is_unlocked"]);
+                if (isUnlocked)
+                {
+                    DataManager.Instance.SetActiveCarId(carId);
+                }
             }
 
             UpdateSelectedCarUI();
@@ -153,9 +154,16 @@ namespace RacingUI
 
         public void UpdateCoinsUI()
         {
-            if (coinsText != null && DataManager.Instance != null)
+            if (DataManager.Instance != null)
             {
-                coinsText.text = DataManager.Instance.GetCoins().ToString() + " 🪙";
+                if (coinsText != null)
+                {
+                    coinsText.text = DataManager.Instance.GetCoins().ToString();
+                }
+                if (gemsText != null)
+                {
+                    gemsText.text = DataManager.Instance.GetGems().ToString();
+                }
             }
         }
 
@@ -164,13 +172,14 @@ namespace RacingUI
             if (carsInLibrary.Count == 0) return;
             currentCarIndex = (currentCarIndex + 1) % carsInLibrary.Count;
             
-            // Автоматически разблокируем и выбираем машину в БД
             if (DataManager.Instance != null)
             {
                 int carId = System.Convert.ToInt32(carsInLibrary[currentCarIndex]["id"]);
-                DataManager.Instance.UnlockCar(carId);
-                DataManager.Instance.SetActiveCarId(carId);
-                carsInLibrary = DataManager.Instance.GetAllCarsWithStatus();
+                bool isUnlocked = System.Convert.ToBoolean(carsInLibrary[currentCarIndex]["is_unlocked"]);
+                if (isUnlocked)
+                {
+                    DataManager.Instance.SetActiveCarId(carId);
+                }
             }
 
             UpdateSelectedCarUI();
@@ -181,13 +190,14 @@ namespace RacingUI
             if (carsInLibrary.Count == 0) return;
             currentCarIndex = (currentCarIndex - 1 + carsInLibrary.Count) % carsInLibrary.Count;
             
-            // Автоматически разблокируем и выбираем машину в БД
             if (DataManager.Instance != null)
             {
                 int carId = System.Convert.ToInt32(carsInLibrary[currentCarIndex]["id"]);
-                DataManager.Instance.UnlockCar(carId);
-                DataManager.Instance.SetActiveCarId(carId);
-                carsInLibrary = DataManager.Instance.GetAllCarsWithStatus();
+                bool isUnlocked = System.Convert.ToBoolean(carsInLibrary[currentCarIndex]["is_unlocked"]);
+                if (isUnlocked)
+                {
+                    DataManager.Instance.SetActiveCarId(carId);
+                }
             }
 
             UpdateSelectedCarUI();
@@ -347,6 +357,18 @@ namespace RacingUI
         {
             if (btn == null) return;
 
+            // Обновляем текст с текущим уровнем
+            TMP_Text buttonText = btn.GetComponentInChildren<TMP_Text>();
+            if (buttonText != null)
+            {
+                string baseName = "Улучшить";
+                if (statName == "engine") baseName = "Улучшить двигатель";
+                else if (statName == "handling") baseName = "Улучшить управляемость";
+                else if (statName == "nitro") baseName = "Улучшить нитро";
+
+                buttonText.text = $"{baseName} (Ур. {currentLevel}/{maxUpgradeLevel})";
+            }
+
             // Если машина заблокирована, нельзя улучшать
             if (!isUnlocked)
             {
@@ -364,7 +386,7 @@ namespace RacingUI
             }
 
             int cost = CalculateUpgradeCost(currentLevel);
-            if (costText != null) costText.text = $"{cost} 🪙";
+            if (costText != null) costText.text = $"{cost}";
 
             int playerCoins = DataManager.Instance.GetCoins();
             btn.interactable = playerCoins >= cost;
@@ -410,27 +432,62 @@ namespace RacingUI
         }
 
         // Вызовы кнопок прокачки
-        public void UpgradeEngine() => TriggerUpgrade("engine", engineSlider.value);
-        public void UpgradeHandling() => TriggerUpgrade("handling", handlingSlider.value);
-        public void UpgradeNitro() => TriggerUpgrade("nitro", nitroSlider.value);
+        public void UpgradeEngine()
+        {
+            Debug.Log("[GarageManager] Нажата кнопка улучшения двигателя");
+            TriggerUpgrade("engine");
+        }
 
-        private void TriggerUpgrade(string statName, float currentLevelFloat)
+        public void UpgradeHandling()
+        {
+            Debug.Log("[GarageManager] Нажата кнопка улучшения управляемости");
+            TriggerUpgrade("handling");
+        }
+
+        public void UpgradeNitro()
+        {
+            Debug.Log("[GarageManager] Нажата кнопка улучшения нитро");
+            TriggerUpgrade("nitro");
+        }
+
+        private void TriggerUpgrade(string statName)
         {
             var car = carsInLibrary[currentCarIndex];
             int carId = System.Convert.ToInt32(car["id"]);
-            int currentLevel = Mathf.RoundToInt(currentLevelFloat);
+            bool isUnlocked = System.Convert.ToBoolean(car["is_unlocked"]);
+
+            Debug.Log($"[GarageManager] Попытка улучшения {statName} для машины ID={carId}. Разблокирована ли: {isUnlocked}");
+
+            if (!isUnlocked)
+            {
+                Debug.LogWarning("[GarageManager] Нельзя улучшать закрытую машину!");
+                return;
+            }
+
+            var levels = DataManager.Instance.GetCarUpgradeLevels(carId);
+            int currentLevel = levels[statName.ToLower()];
             int cost = CalculateUpgradeCost(currentLevel);
+            int playerCoins = DataManager.Instance.GetCoins();
+
+            Debug.Log($"[GarageManager] Текущий уровень: {currentLevel}, Стоимость улучшения: {cost}, Монет у игрока: {playerCoins}");
 
             if (DataManager.Instance.UpgradeCarStat(carId, statName, cost))
             {
+                Debug.Log($"[GarageManager] Характеристика {statName} успешно улучшена!");
                 RefreshGarageData();
                 
                 // Передаем обновленные параметры физики в CarStatsUI (если он активен)
-                if (statsUI != null)
+                if (statsUI != null && instantiatedModel != null)
                 {
+                    var controller = instantiatedModel.GetComponent<Ezereal.EzerealCarController>();
+                    if (controller == null) controller = instantiatedModel.GetComponentInChildren<Ezereal.EzerealCarController>();
                     // Обновляем параметры демонстрационной машины на лету
-                    ApplyUpgradesToController(instantiatedModel.GetComponent<Ezereal.EzerealCarController>(), carId);
+                    ApplyUpgradesToController(controller, carId);
                 }
+            }
+            else
+            {
+                Debug.LogError($"[GarageManager] База данных вернула ошибку при улучшении {statName}!");
             }
         }
 
