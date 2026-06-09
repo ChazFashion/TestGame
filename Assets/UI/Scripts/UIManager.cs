@@ -13,7 +13,6 @@ namespace RacingUI
         [Header("Screens (Экраны)")]
         public GameObject garageScreen;
         public GameObject raceSelectScreen;
-        public GameObject showRoomScreen;
         public GameObject shopScreen;
 
         [Header("Auto Selection (Для геймпада)")]
@@ -66,8 +65,9 @@ namespace RacingUI
                     // Задержка перед выделением кнопки, чтобы избежать ложных нажатий
                     StartCoroutine(SelectButtonDelayed(firstRaceButton));
                     break;
-                case 2: SwitchScreen(showRoomScreen, true); break;
-                case 3: SwitchScreen(shopScreen, true); break;
+                case 2: 
+                    SwitchScreen(shopScreen, true); 
+                    break;
             }
         }
 
@@ -91,12 +91,12 @@ namespace RacingUI
 
             if (direction > 0) // Вправо (RB)
             {
-                int next = (currentTabIndex + 1) % 4;
+                int next = (currentTabIndex + 1) % 3;
                 SelectTab(next);
             }
             else if (direction < 0) // Влево (LB)
             {
-                int prev = (currentTabIndex - 1 + 4) % 4;
+                int prev = (currentTabIndex - 1 + 3) % 3;
                 SelectTab(prev);
             }
         }
@@ -130,7 +130,6 @@ namespace RacingUI
             // 3. Скрываем все экраны меню
             if (garageScreen != null) garageScreen.SetActive(false);
             if (raceSelectScreen != null) raceSelectScreen.SetActive(false);
-            if (showRoomScreen != null) showRoomScreen.SetActive(false);
             if (shopScreen != null) shopScreen.SetActive(false);
 
             // 4. Управляем игровым HUD

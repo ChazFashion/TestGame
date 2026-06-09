@@ -34,6 +34,9 @@ namespace RacingUI
 
         private void Start()
         {
+            minRPMAngle = 90f;
+            maxRPMAngle = -90f;
+
             // Если ссылка не перетащена в инспекторе, попробуем найти на сцене
             if (carController == null)
             {
@@ -107,7 +110,7 @@ namespace RacingUI
         private float GetAngleFromRPM(float rpm)
         {
             // Нормализуем обороты в диапазоне от idleRPM до maxRPM
-            float t = Mathf.InverseLerp(0f, carController.maxRPM, rpm);
+            float t = Mathf.InverseLerp(carController.idleRPM, carController.maxRPM, rpm);
             
             // Линейно интерполируем угол между минимальным и максимальным значениями
             return Mathf.Lerp(minRPMAngle, maxRPMAngle, t);

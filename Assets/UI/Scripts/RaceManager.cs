@@ -134,8 +134,19 @@ namespace RacingUI
                         playerPos.y += 0.25f; // Приподнимаем над землей, чтобы исключить застревание
                         GameObject spawned = Instantiate(prefabToSpawn, playerPos, playerRot);
                         spawned.name = "PlayerCar_" + prefabName;
+                        RemoveEmbeddedUI(spawned);
                         playerCar = spawned.GetComponent<EzerealCarController>();
                         if (playerCar == null) playerCar = spawned.GetComponentInChildren<EzerealCarController>();
+
+                        // Привязываем UI-элементы сцены гонки к контроллеру игрока
+                        GameObject speedObj = GameObject.Find("Current Speed TMP");
+                        GameObject gearObj = GameObject.Find("Current Gear TMP");
+                        TMPro.TMP_Text speedText = speedObj != null ? speedObj.GetComponent<TMPro.TMP_Text>() : null;
+                        TMPro.TMP_Text gearText = gearObj != null ? gearObj.GetComponent<TMPro.TMP_Text>() : null;
+                        if (playerCar != null)
+                        {
+                            playerCar.SetUITextReferences(speedText, gearText);
+                        }
 
                         // Если используем стандартную машину-заполнитель, подменяем её 3D-модель на нужную из БД
                         if (prefabToSpawn == defaultPlayerCarPrefab && mapping.menuShowcasePrefab != null)
@@ -145,6 +156,9 @@ namespace RacingUI
 
                         Debug.Log($"[RaceManager] Успешно заспавнена машина игрока: {spawned.name}");
                         ApplyUpgradesToCar(playerCar, activeCarId);
+                        
+                        // Добавляем контроллер Нитро на машину игрока
+                        spawned.AddComponent<NitroController>();
 
 
 
@@ -221,6 +235,7 @@ namespace RacingUI
                         aiPos.y += 0.25f; // Приподнимаем над землей, чтобы исключить застревание
                         GameObject spawned = Instantiate(botPrefab, aiPos, aiRot);
                         spawned.name = "AICar_" + botName;
+                        RemoveEmbeddedUI(spawned);
                         aiCar = spawned.GetComponent<EzerealCarController>();
                         if (aiCar == null) aiCar = spawned.GetComponentInChildren<EzerealCarController>();
 
@@ -249,27 +264,28 @@ namespace RacingUI
                         {
                             aiDriver.botName = botName;
 
-                            // Назначаем контейнер вейпоинтов для бота
-                            if (aiWaypointsContainer == null)
+                            // Назначаем контейнер вейпоинтов для бота (для вождения)
+                            Transform drivingWaypoints = aiWaypointsContainer;
+                            if (drivingWaypoints == null)
                             {
                                 GameObject wpObj = GameObject.Find("Waypoints");
                                 if (wpObj != null)
                                 {
-                                    aiWaypointsContainer = wpObj.transform;
+                                    drivingWaypoints = wpObj.transform;
                                 }
                             }
 
-                            if (aiWaypointsContainer != null)
+                            if (drivingWaypoints != null)
                             {
-                                var wpContainer = aiWaypointsContainer.GetComponent<WaypointContainer>();
+                                var wpContainer = drivingWaypoints.GetComponent<WaypointContainer>();
                                 if (wpContainer == null)
                                 {
-                                    wpContainer = aiWaypointsContainer.gameObject.AddComponent<WaypointContainer>();
-                                    int count = aiWaypointsContainer.childCount;
+                                    wpContainer = drivingWaypoints.gameObject.AddComponent<WaypointContainer>();
+                                    int count = drivingWaypoints.childCount;
                                     wpContainer.waypoints = new Transform[count];
                                     for (int i = 0; i < count; i++)
                                     {
-                                        wpContainer.waypoints[i] = aiWaypointsContainer.GetChild(i);
+                                        wpContainer.waypoints[i] = drivingWaypoints.GetChild(i);
                                     }
                                 }
                                 aiDriver.waypointContainer = wpContainer;
@@ -295,6 +311,17 @@ namespace RacingUI
                         Debug.LogError($"[RaceManager] Не найден геймплейный префаб бота для: {botPrefabName}");
                     }
                 }
+            }
+        }
+
+        private void RemoveEmbeddedUI(GameObject carGo)
+        {
+            if (carGo == null) return;
+            Canvas[] canvases = carGo.GetComponentsInChildren<Canvas>(true);
+            foreach (Canvas canvas in canvases)
+            {
+                Debug.Log($"[RaceManager] Удален встроенный UI Canvas: {canvas.name} на объекте {carGo.name}");
+                Destroy(canvas.gameObject);
             }
         }
 
@@ -882,6 +909,19 @@ namespace RacingUI
                 if (state.isPlayer)
                 {
                     UpdateLapUI();
+
+                    // Пополняем бак Нитро при завершении круга
+                    if (playerCar != null)
+                    {
+                        var nitroCtrl = playerCar.GetComponent<NitroController>();
+                        if (nitroCtrl == null) nitroCtrl = playerCar.GetComponentInParent<NitroController>();
+                        if (nitroCtrl == null) nitroCtrl = playerCar.GetComponentInChildren<NitroController>();
+                        
+                        if (nitroCtrl != null)
+                        {
+                            nitroCtrl.RefillNitro();
+                        }
+                    }
                 }
 
                 // Проверка завершения гонки (все круги пройдены)
@@ -907,6 +947,14 @@ namespace RacingUI
                         if (dm != null && state.bestLapTime != float.MaxValue)
                         {
                             dm.SaveRaceRecord(trackId, state.bestLapTime);
+                        }
+                    }
+                    else
+                    {
+                        // Если бот финишировал первым, гонка сразу завершается поражением игрока
+                        if (rank == 1)
+                        {
+                            FinishRace(2);
                         }
                     }
                 }
@@ -1014,9 +1062,21 @@ namespace RacingUI
                 if (restartBtn != null) UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(restartBtn);
             }
 
+            // Расчет награды: 100 монет за круг при победе, 50 монет за круг при поражении
+            int coinsPerLap = (rank == 1) ? 100 : 50;
+            int rewardCoins = totalLaps * coinsPerLap;
+
+            // Сохранение награды в базу данных
+            if (DataManager.Instance != null)
+            {
+                DataManager.Instance.AddCoins(rewardCoins);
+                Debug.Log($"[RaceManager] Начислено монет за финиш на месте #{rank}: {rewardCoins} (кругов в гонке: {totalLaps})");
+            }
+
             if (resultText != null)
             {
-                resultText.text = "ВАШЕ МЕСТО: " + rank;
+                string statusText = (rank == 1) ? "ПОБЕДА!" : "ПОРАЖЕНИЕ";
+                resultText.text = $"{statusText}\nНАГРАДА: +{rewardCoins} монет";
             }
 
             Cursor.visible = true;
